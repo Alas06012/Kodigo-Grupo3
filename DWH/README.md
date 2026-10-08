@@ -1,0 +1,1 @@
+Aquí solamente sql de la base Datawarehouse
