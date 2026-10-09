@@ -1,0 +1,14 @@
+# Dependencias del Pipeline de Ingesta Masiva Parquet -> Oracle OLTP
+# Instalación: pip install -r requirements.txt
+
+# Manipulación de datos y estructuras tabulares
+pandas>=2.0.0
+
+# Operaciones numéricas y vectorizadas
+numpy>=1.24.0
+
+# Motor de lectura y parseo de archivos Apache Parquet
+pyarrow>=14.0.0
+
+# Driver oficial de conexión a bases de datos Oracle (Thin & Thick mode)
+oracledb>=2.0.0

@@ -1,0 +1,7 @@
+# Dependencias del Pipeline de Ingesta Masiva Parquet -> Oracle OLTP
+# Instalación: pip install -r requirements.txt (o pip install -r requeriments.txt)
+
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+oracledb>=2.0.0

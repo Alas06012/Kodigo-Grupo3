@@ -34,9 +34,11 @@ Esta carpeta contiene la infraestructura de carga masiva de datos sintéticos/pr
 
 ```plaintext
 /OLTP/Data/IngestaParquet/
+├── requirements.txt                             <- Dependencias de Python (pandas, pyarrow, oracledb, numpy)
 ├── 00_LIMPIAR_TABLAS_OLTP.sql                   <- Deshabilita FKs, trunca las 18 tablas y rehabilita FKs
 ├── 01_PRE_INGESTA_IDENTITY_BY_DEFAULT.sql       <- Habilita 'BY DEFAULT ON NULL' en las 18 columnas Identity
 ├── 02_POST_INGESTA_IDENTITY_ALWAYS_RESTART.sql  <- Calcula MAX(ID)+1, reinicia secuencias y bloquea a ALWAYS
+├── 03_AUDITORIA_INTEGRIDAD_INGESTA.sql          <- Valida conteo, ausencia de huérfanos y cuadre contable
 ├── ingestar_parquets_oltp.py                    <- Runner masivo de alta velocidad (python-oracledb)
 └── README.md                                    <- Este documento
 ```
@@ -44,6 +46,11 @@ Esta carpeta contiene la infraestructura de carga masiva de datos sintéticos/pr
 ---
 
 ## 3. Instrucciones de Ejecución
+
+### Paso Previo: Instalar Dependencias de Python
+```powershell
+pip install -r "OLTP/Data/IngestaParquet/requirements.txt"
+```
 
 ### Opción A (Recomendada): Ingesta Directa de Alta Velocidad (3 a 5 minutos)
 Utiliza el driver nativo `python-oracledb` con inserciones por lotes de array binds (`executemany`):
