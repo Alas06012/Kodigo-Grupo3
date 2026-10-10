@@ -1,0 +1,28 @@
+-- ============================================================================
+-- TABLA DIMENSIONAL: DIM_TIPO_CONSULTA (SCD Tipo 1)
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE TABLE DIM_TIPO_CONSULTA (
+    SK_TIPO_CONSULTA      NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_TIPO_CONSULTA   NUMBER NOT NULL,
+    NOMBRE_TIPO           VARCHAR2(60) NOT NULL,
+    DESCRIPCION           VARCHAR2(250),
+    PRECIO_BASE           NUMBER(10,2) NOT NULL,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_TIPO_CONSULTA PRIMARY KEY (SK_TIPO_CONSULTA),
+    CONSTRAINT UQ_DIM_TPC_BK        UNIQUE (BK_ID_TIPO_CONSULTA),
+    CONSTRAINT CK_DIM_TPC_FLAG      CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_TPC_CARGA     CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_TPC_TRX       CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+
+CREATE INDEX IX_DIM_TPC_HASH ON DIM_TIPO_CONSULTA (ROWHASHVALUE);
+COMMENT ON TABLE DIM_TIPO_CONSULTA IS 'Dimensión SCD1: Modalidades asistenciales de consulta médica y tarifas base';

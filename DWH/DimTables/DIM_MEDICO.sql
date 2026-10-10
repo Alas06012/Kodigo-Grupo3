@@ -1,0 +1,32 @@
+-- ============================================================================
+-- TABLA DIMENSIONAL: DIM_MEDICO (SCD Tipo 2)
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE TABLE DIM_MEDICO (
+    SK_MEDICO             NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_MEDICO          NUMBER NOT NULL,
+    NOMBRES               VARCHAR2(60) NOT NULL,
+    APELLIDOS             VARCHAR2(60) NOT NULL,
+    NOMBRE_COMPLETO       VARCHAR2(125) NOT NULL,
+    BK_ID_CLINICA_BASE    NUMBER NOT NULL,
+    NOMBRE_CLINICA_BASE   VARCHAR2(100) NOT NULL,
+    NUM_COLEGIADO         VARCHAR2(20) NOT NULL,
+    FECHA_INGRESO         DATE NOT NULL,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_MEDICO   PRIMARY KEY (SK_MEDICO),
+    CONSTRAINT CK_DIM_MED_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_MED_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_MED_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+
+CREATE INDEX IX_DIM_MED_BK_VIG ON DIM_MEDICO (BK_ID_MEDICO, CURRENTFLAG);
+CREATE INDEX IX_DIM_MED_HASH   ON DIM_MEDICO (ROWHASHVALUE);
+COMMENT ON TABLE DIM_MEDICO IS 'Dimensión SCD2: Profesionales médicos adscritos a la red y clínica base de contratación';

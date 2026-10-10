@@ -1,0 +1,25 @@
+-- ============================================================================
+-- TABLA STAGING: STG_MEDICOS_ESPECIALIDADES
+-- ESQUEMA: stg_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE TABLE STG_MEDICOS_ESPECIALIDADES (
+    ID_MEDICO_ESPECIALIDAD NUMBER NOT NULL,
+    ID_MEDICO              NUMBER NOT NULL,
+    ID_ESPECIALIDAD        NUMBER NOT NULL,
+    NUM_REGISTRO_ESPECIAL  VARCHAR2(30),
+    ES_PRINCIPAL           CHAR(1) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG            NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA              VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO            DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN               DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION        CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE           VARCHAR2(64) NOT NULL,
+    CONSTRAINT CK_STG_MES_FLAG   CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_STG_MES_CARGA  CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_STG_MES_TRX    CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+
+CREATE INDEX IX_STG_MES_ID ON STG_MEDICOS_ESPECIALIDADES (ID_MEDICO_ESPECIALIDAD);
+COMMENT ON TABLE STG_MEDICOS_ESPECIALIDADES IS 'Staging: Acreditación N:M médicos a especialidades';

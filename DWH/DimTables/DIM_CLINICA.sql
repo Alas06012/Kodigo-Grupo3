@@ -1,0 +1,35 @@
+-- ============================================================================
+-- TABLA DIMENSIONAL: DIM_CLINICA (SCD Tipo 2)
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE TABLE DIM_CLINICA (
+    SK_CLINICA            NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_CLINICA         NUMBER NOT NULL,
+    NOMBRE_CLINICA        VARCHAR2(100) NOT NULL,
+    BK_ID_UBICACION       NUMBER NOT NULL,
+    PAIS                  VARCHAR2(60) NOT NULL,
+    DEPARTAMENTO          VARCHAR2(60) NOT NULL,
+    MUNICIPIO             VARCHAR2(60) NOT NULL,
+    DISTRITO              VARCHAR2(60) NOT NULL,
+    CODIGO_POSTAL         VARCHAR2(10),
+    DIRECCION             VARCHAR2(200),
+    TELEFONO              VARCHAR2(20),
+    FECHA_APERTURA        DATE,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_CLINICA   PRIMARY KEY (SK_CLINICA),
+    CONSTRAINT CK_DIM_CLI_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_CLI_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_CLI_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+
+CREATE INDEX IX_DIM_CLI_BK_VIG ON DIM_CLINICA (BK_ID_CLINICA, CURRENTFLAG);
+CREATE INDEX IX_DIM_CLI_HASH   ON DIM_CLINICA (ROWHASHVALUE);
+COMMENT ON TABLE DIM_CLINICA IS 'Dimensión SCD2: Sedes asistenciales de la red médica con historial de traslados y estado';
