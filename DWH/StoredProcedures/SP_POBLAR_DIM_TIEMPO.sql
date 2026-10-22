@@ -8,7 +8,7 @@ CREATE OR REPLACE PROCEDURE SP_POBLAR_DIM_TIEMPO (
     p_anio_inicio IN NUMBER DEFAULT 2024,
     p_anio_fin    IN NUMBER DEFAULT 2030
 )
-AUTHID CURRENT_USER
+AUTHID DEFINER
 IS
     v_fecha_inicio DATE;
     v_fecha_fin    DATE;

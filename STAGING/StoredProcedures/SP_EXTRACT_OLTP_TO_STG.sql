@@ -12,7 +12,7 @@ CREATE OR REPLACE PROCEDURE SP_EXTRACT_OLTP_TO_STG (
     p_dias_lookback  IN NUMBER   DEFAULT 3,
     p_fecha_corte    IN DATE     DEFAULT NULL
 )
-AUTHID CURRENT_USER
+AUTHID DEFINER
 IS
     v_inicio_proc TIMESTAMP := SYSTIMESTAMP;
     v_tipo_carga  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));

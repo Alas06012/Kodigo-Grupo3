@@ -1,13 +1,13 @@
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_ASEGURADORAS
--- OBJETIVO:      Extracción directa desde red_clinica_db.ASEGURADORAS hacia stg_clinicas_db.STG_ASEGURADORAS
+-- OBJETIVO:      Extracción directa desde red_clinica_user.ASEGURADORAS hacia stg_clinica_user.STG_ASEGURADORAS
 -- ESQUEMA:       stg_clinica_user | MOTOR: Oracle Database
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_ASEGURADORAS (
     p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
 )
-AUTHID CURRENT_USER
+AUTHID DEFINER
 IS
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
@@ -43,7 +43,7 @@ BEGIN
             NVL(o.TELEFONO, '~'),
             'SHA256'
         ))
-    FROM red_clinica_db.ASEGURADORAS o;
+    FROM red_clinica_user.ASEGURADORAS o;
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;

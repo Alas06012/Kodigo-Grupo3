@@ -10,7 +10,7 @@ CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_DIAGNOSTICOS (
     p_dias_lookback  IN NUMBER   DEFAULT 3,
     p_fecha_corte    IN DATE     DEFAULT NULL
 )
-AUTHID CURRENT_USER
+AUTHID DEFINER
 IS
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
