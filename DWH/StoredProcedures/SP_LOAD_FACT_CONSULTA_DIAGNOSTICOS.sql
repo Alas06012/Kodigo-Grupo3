@@ -8,13 +8,18 @@
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_CONSULTA_DIAGNOSTICOS', 'SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS', v_tipo, v_audit_id);
     MERGE INTO FACT_CONSULTA_DIAGNOSTICOS f
     USING (
         WITH CONTEO_DIAG AS (
@@ -81,10 +86,14 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS ejecutado: ' || v_cant || ' filas procesadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS: ' || SQLERRM);
         RAISE;
 END SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS;

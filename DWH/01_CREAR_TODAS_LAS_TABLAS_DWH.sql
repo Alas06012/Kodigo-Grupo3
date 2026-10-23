@@ -21,7 +21,7 @@ BEGIN
         SELECT table_name 
         FROM user_tables 
         WHERE table_name IN (
-            'FACT_COBROS_DISTRIBUCION', 'FACT_CONSULTA_DIAGNOSTICOS', 'FACT_CONSULTAS',
+            'CTL_ETL_AUDIT', 'FACT_COBROS_DISTRIBUCION', 'FACT_CONSULTA_DIAGNOSTICOS', 'FACT_CONSULTAS',
             'DIM_PACIENTE', 'DIM_MEDICO', 'DIM_PAGADOR', 'DIM_FORMA_PAGO',
             'DIM_TIPO_CONSULTA', 'DIM_ENFERMEDAD', 'DIM_ESPECIALIDAD',
             'DIM_CLINICA', 'DIM_UBICACION', 'DIM_TIEMPO'
@@ -259,7 +259,6 @@ CREATE TABLE DIM_MEDICO (
     NOMBRE_CLINICA_BASE   VARCHAR2(100),
     FECHA_INGRESO         DATE NOT NULL,
     ESTADO                VARCHAR2(10) NOT NULL,
-    ESPECIALIDAD_PRINCIPAL VARCHAR2(80),
     -- 6 Columnas Técnicas de Auditoría
     CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
     TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
@@ -390,6 +389,7 @@ COMMENT ON TABLE FACT_CONSULTAS IS 'Tabla de Hechos: Consultas médicas ejecutad
 CREATE TABLE FACT_CONSULTA_DIAGNOSTICOS (
     SK_CONSULTA_DIAGNOSTICO   NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
     BK_ID_DIAGNOSTICO         NUMBER NOT NULL,
+    BK_ID_CONSULTA            NUMBER NOT NULL,
     -- Claves Foráneas hacia las Dimensiones
     SK_TIEMPO                 NUMBER(8) NOT NULL,
     SK_PACIENTE               NUMBER NOT NULL,
@@ -398,10 +398,13 @@ CREATE TABLE FACT_CONSULTA_DIAGNOSTICOS (
     SK_ESPECIALIDAD           NUMBER NOT NULL,
     SK_ENFERMEDAD             NUMBER NOT NULL,
     SK_UBICACION_PACIENTE     NUMBER NOT NULL,
-    -- Métricas cuantitativas
+    -- Métricas cuantitativas y epidemiológicas
     CONTEO_DIAGNOSTICO        NUMBER(1)    DEFAULT 1 NOT NULL,
+    TOTAL_DIAGNOSTICOS_CONS   NUMBER(3)    NOT NULL,
     MONTO_TOTAL_CONSULTA      NUMBER(10,2) NOT NULL,
     MONTO_PRORRATEADO         NUMBER(10,2) NOT NULL,
+    -- Atributo degenerado
+    OBSERVACIONES             VARCHAR2(300),
     -- 6 Columnas Técnicas de Auditoría
     CURRENTFLAG               NUMBER(1)    DEFAULT 1 NOT NULL,
     TIPOCARGA                 VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
@@ -489,4 +492,38 @@ COMMENT ON TABLE FACT_COBROS_DISTRIBUCION IS 'Tabla de Hechos: Desglose de respo
 
 PROMPT ============================================================================
 PROMPT ESQUEMA DATA WAREHOUSE CREADO EXITOSAMENTE (10 DIMENSIONES + 3 HECHOS CON 19 FKS).
+-- ============================================================================
+-- 3. TABLA DE CONTROL Y AUDITORÍA DE PROCESOS (CTL_ETL_AUDIT)
+-- ============================================================================
+CREATE TABLE CTL_ETL_AUDIT (
+    ID_AUDIT              NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BATCH_ID              VARCHAR2(50)  NOT NULL,              -- Identificador único del lote (ej. BATCH_20261022_0200)
+    CAPA                  VARCHAR2(20)  NOT NULL,              -- 'STAGING', 'DWH_DIM', 'DWH_FACT', 'ORCHESTRATOR'
+    OBJETO_DESTINO        VARCHAR2(60)  NOT NULL,              -- Nombre de la tabla o entidad (ej. FACT_CONSULTAS)
+    PROCEDIMIENTO         VARCHAR2(60)  NOT NULL,              -- Nombre del SP (ej. SP_LOAD_FACT_CONSULTAS)
+    TIPO_CARGA            VARCHAR2(20)  DEFAULT 'INCREMENTAL', -- 'FULL' o 'INCREMENTAL'
+    FECHA_INICIO          TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    FECHA_FIN             TIMESTAMP,
+    DURACION_SEGUNDOS     NUMBER(10,2),
+    FILAS_LEIDAS          NUMBER(12)    DEFAULT 0,
+    FILAS_INSERTADAS      NUMBER(12)    DEFAULT 0,
+    FILAS_ACTUALIZADAS    NUMBER(12)    DEFAULT 0,
+    FILAS_RECHAZADAS      NUMBER(12)    DEFAULT 0,
+    ESTADO                VARCHAR2(20)  DEFAULT 'RUNNING',     -- 'RUNNING', 'SUCCESS', 'WARNING', 'FAILED'
+    CODIGO_ERROR          VARCHAR2(30),
+    MENSAJE_ERROR         VARCHAR2(4000),
+    USUARIO_EJECUCION     VARCHAR2(60)  DEFAULT USER,
+    HOST_NAME             VARCHAR2(100) DEFAULT SYS_CONTEXT('USERENV', 'HOST'),
+    CONSTRAINT PK_CTL_ETL_AUDIT PRIMARY KEY (ID_AUDIT),
+    CONSTRAINT CK_CTL_AUD_ESTADO CHECK (ESTADO IN ('RUNNING', 'SUCCESS', 'WARNING', 'FAILED'))
+);
+
+CREATE INDEX IX_CTL_AUD_BATCH  ON CTL_ETL_AUDIT (BATCH_ID);
+CREATE INDEX IX_CTL_AUD_FECHA  ON CTL_ETL_AUDIT (FECHA_INICIO);
+CREATE INDEX IX_CTL_AUD_ESTADO ON CTL_ETL_AUDIT (ESTADO);
+
+GRANT SELECT, INSERT, UPDATE ON CTL_ETL_AUDIT TO stg_clinica_user;
+
+COMMENT ON TABLE CTL_ETL_AUDIT IS 'Tabla de control y auditoría de ejecuciones del pipeline analítico';
+
 PROMPT ============================================================================

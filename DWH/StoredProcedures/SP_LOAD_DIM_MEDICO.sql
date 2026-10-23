@@ -6,14 +6,19 @@
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_MEDICO (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_upd  NUMBER := 0;
     v_ins  NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_MEDICO', 'SP_LOAD_DIM_MEDICO', v_tipo, v_audit_id);
     -- 1. Caducar registros previos cuyos atributos cambiaron (SCD Tipo 2)
     UPDATE DIM_MEDICO d
     SET d.CURRENTFLAG     = 0,
@@ -69,12 +74,15 @@ BEGIN
           ))
     );
     v_ins := SQL%ROWCOUNT;
-
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_MEDICO ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_MEDICO: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_MEDICO;

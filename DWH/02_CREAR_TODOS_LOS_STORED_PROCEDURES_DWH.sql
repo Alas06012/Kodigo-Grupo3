@@ -1,16 +1,166 @@
 /* ============================================================================
-   PROYECTO DATA WAREHOUSE - RED DE CLINICAS
-   MASTER DDL/PLSQL: COMPILACION DE TODOS LOS STORED PROCEDURES DE DWH (15)
-   ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database (XEPDB1)
+   PROYECTO DATA WAREHOUSE - RED DE CLÍNICAS
+   COMPILACIÓN CONSOLIDADA DE TODOS LOS STORED PROCEDURES DEL DATA WAREHOUSE
+   MOTOR: Oracle Database 19c / 21c / 23ai
+   ESQUEMA: dwh_clinica_user | TABLESPACE: dwh_clinicas_db
+   ============================================================================
+   INSTRUCCIONES DE EJECUCIÓN:
+     - Conectarse en SQL Developer, DBeaver, VS Code o SQL*Plus como: dwh_clinica_user
+     - Este script compila los 18 stored procedures del Data Warehouse:
+       * 3 Procedimientos de auditoría autónoma (SP_AUDIT_START, SP_AUDIT_END, SP_AUDIT_ERROR)
+       * 2 Procedimientos de Dimensión Tiempo (Poblar + Wrapper)
+       * 9 Procedimientos de Dimensiones (6 SCD1 + 3 SCD2)
+       * 3 Procedimientos de Tablas de Hechos (Fact Consultas, Diagnósticos, Cobros)
+       * 1 Procedimiento Maestro Orquestador (SP_LOAD_DWH_MASTER)
    ============================================================================ */
 
--- Permite ver los mensajes de DBMS_OUTPUT en consolas SQL*Plus / SQLcl / DBeaver
-SET SERVEROUTPUT ON SIZE UNLIMITED;
+SET FEEDBACK ON;
+SET ECHO OFF;
+
 
 
 -- ============================================================================
--- (1/15) PROCEDIMIENTO: SP_POBLAR_DIM_TIEMPO.sql
+-- PROCEDIMIENTO: SP_AUDIT_START
+-- OBJETIVO:      Registrar el inicio de un proceso ETL en CTL_ETL_AUDIT
+--                usando transacciones autónomas para no depender del commit de datos.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
 -- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_START (
+    p_batch_id       IN  VARCHAR2,
+    p_capa           IN  VARCHAR2,
+    p_objeto_destino IN  VARCHAR2,
+    p_procedimiento  IN  VARCHAR2,
+    p_tipo_carga     IN  VARCHAR2,
+    o_id_audit       OUT NUMBER
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    INSERT INTO CTL_ETL_AUDIT (
+        BATCH_ID,
+        CAPA,
+        OBJETO_DESTINO,
+        PROCEDIMIENTO,
+        TIPO_CARGA,
+        FECHA_INICIO,
+        ESTADO
+    ) VALUES (
+        p_batch_id,
+        UPPER(p_capa),
+        UPPER(p_objeto_destino),
+        UPPER(p_procedimiento),
+        UPPER(p_tipo_carga),
+        SYSTIMESTAMP,
+        'RUNNING'
+    )
+    RETURNING ID_AUDIT INTO o_id_audit;
+
+    COMMIT;
+END SP_AUDIT_START;
+/
+
+GRANT EXECUTE ON SP_AUDIT_START TO stg_clinica_user;
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_AUDIT_END
+-- OBJETIVO:      Registrar la finalización exitosa de un proceso ETL en CTL_ETL_AUDIT
+--                calculando la duración en segundos y filas procesadas.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_END (
+    p_id_audit           IN NUMBER,
+    p_filas_leidas       IN NUMBER DEFAULT 0,
+    p_filas_insertadas   IN NUMBER DEFAULT 0,
+    p_filas_actualizadas IN NUMBER DEFAULT 0,
+    p_filas_rechazadas   IN NUMBER DEFAULT 0,
+    p_estado             IN VARCHAR2 DEFAULT 'SUCCESS'
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+    v_inicio TIMESTAMP;
+BEGIN
+    SELECT FECHA_INICIO INTO v_inicio
+    FROM CTL_ETL_AUDIT
+    WHERE ID_AUDIT = p_id_audit;
+
+    UPDATE CTL_ETL_AUDIT
+    SET FECHA_FIN          = SYSTIMESTAMP,
+        DURACION_SEGUNDOS  = ROUND(
+            EXTRACT(DAY FROM (SYSTIMESTAMP - v_inicio)) * 86400 +
+            EXTRACT(HOUR FROM (SYSTIMESTAMP - v_inicio)) * 3600 +
+            EXTRACT(MINUTE FROM (SYSTIMESTAMP - v_inicio)) * 60 +
+            EXTRACT(SECOND FROM (SYSTIMESTAMP - v_inicio)),
+            2
+        ),
+        FILAS_LEIDAS       = NVL(p_filas_leidas, 0),
+        FILAS_INSERTADAS   = NVL(p_filas_insertadas, 0),
+        FILAS_ACTUALIZADAS = NVL(p_filas_actualizadas, 0),
+        FILAS_RECHAZADAS   = NVL(p_filas_rechazadas, 0),
+        ESTADO             = NVL(p_estado, 'SUCCESS')
+    WHERE ID_AUDIT = p_id_audit;
+
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+END SP_AUDIT_END;
+/
+
+GRANT EXECUTE ON SP_AUDIT_END TO stg_clinica_user;
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_AUDIT_ERROR
+-- OBJETIVO:      Registrar el fallo de ejecución en CTL_ETL_AUDIT preservando
+--                el código y mensaje de error incluso ante un ROLLBACK de datos.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_ERROR (
+    p_id_audit      IN NUMBER,
+    p_codigo_error  IN VARCHAR2,
+    p_mensaje_error IN VARCHAR2
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+    v_inicio TIMESTAMP;
+BEGIN
+    BEGIN
+        SELECT FECHA_INICIO INTO v_inicio
+        FROM CTL_ETL_AUDIT
+        WHERE ID_AUDIT = p_id_audit;
+    EXCEPTION
+        WHEN OTHERS THEN
+            v_inicio := SYSTIMESTAMP;
+    END;
+
+    UPDATE CTL_ETL_AUDIT
+    SET FECHA_FIN         = SYSTIMESTAMP,
+        DURACION_SEGUNDOS = ROUND(
+            EXTRACT(DAY FROM (SYSTIMESTAMP - v_inicio)) * 86400 +
+            EXTRACT(HOUR FROM (SYSTIMESTAMP - v_inicio)) * 3600 +
+            EXTRACT(MINUTE FROM (SYSTIMESTAMP - v_inicio)) * 60 +
+            EXTRACT(SECOND FROM (SYSTIMESTAMP - v_inicio)),
+            2
+        ),
+        ESTADO            = 'FAILED',
+        CODIGO_ERROR      = SUBSTR(p_codigo_error, 1, 30),
+        MENSAJE_ERROR     = SUBSTR(p_mensaje_error, 1, 4000)
+    WHERE ID_AUDIT = p_id_audit;
+
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+END SP_AUDIT_ERROR;
+/
+
+GRANT EXECUTE ON SP_AUDIT_ERROR TO stg_clinica_user;
+
 -- ============================================================================
 -- PROCEDIMIENTO: SP_POBLAR_DIM_TIEMPO
 -- OBJETIVO: Generar y cargar el calendario dimensional continuo (2024 al 2030)
@@ -19,7 +169,8 @@ SET SERVEROUTPUT ON SIZE UNLIMITED;
 
 CREATE OR REPLACE PROCEDURE SP_POBLAR_DIM_TIEMPO (
     p_anio_inicio IN NUMBER DEFAULT 2024,
-    p_anio_fin    IN NUMBER DEFAULT 2030
+    p_anio_fin    IN NUMBER   DEFAULT 2030,
+    p_batch_id    IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
@@ -27,7 +178,11 @@ IS
     v_fecha_fin    DATE;
     v_total_dias   NUMBER;
     v_insertados   NUMBER := 0;
+    v_batch_id     VARCHAR2(50);
+    v_audit_id     NUMBER;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_TIEMPO', 'SP_POBLAR_DIM_TIEMPO', 'FULL', v_audit_id);
     v_fecha_inicio := TO_DATE(p_anio_inicio || '-01-01', 'YYYY-MM-DD');
     v_fecha_fin    := TO_DATE(p_anio_fin || '-12-31', 'YYYY-MM-DD');
     v_total_dias   := (v_fecha_fin - v_fecha_inicio) + 1;
@@ -184,19 +339,19 @@ BEGIN
 
     v_insertados := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_insertados, v_insertados, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('DIM_TIEMPO poblada exitosamente: ' || v_insertados || ' días registrados.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error poblando DIM_TIEMPO: ' || SQLERRM);
         RAISE;
 END SP_POBLAR_DIM_TIEMPO;
 /
 
-
--- ============================================================================
--- (2/15) PROCEDIMIENTO: SP_LOAD_DIM_TIEMPO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_TIEMPO
 -- OBJETIVO: Wrapper estándar para poblar o actualizar DIM_TIEMPO
@@ -204,20 +359,17 @@ END SP_POBLAR_DIM_TIEMPO;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_TIEMPO (
-    p_anio_inicio IN NUMBER DEFAULT 2024,
-    p_anio_fin    IN NUMBER DEFAULT 2030
+    p_anio_inicio IN NUMBER   DEFAULT 2024,
+    p_anio_fin    IN NUMBER   DEFAULT 2030,
+    p_batch_id    IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
 BEGIN
-    SP_POBLAR_DIM_TIEMPO(p_anio_inicio, p_anio_fin);
+    SP_POBLAR_DIM_TIEMPO(p_anio_inicio, p_anio_fin, p_batch_id);
 END SP_LOAD_DIM_TIEMPO;
 /
 
-
--- ============================================================================
--- (3/15) PROCEDIMIENTO: SP_LOAD_DIM_UBICACION.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_UBICACION (SCD Tipo 1)
 -- TABLA DESTINO: DIM_UBICACION
@@ -226,13 +378,18 @@ END SP_LOAD_DIM_TIEMPO;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_UBICACION (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_UBICACION', 'SP_LOAD_DIM_UBICACION', v_tipo, v_audit_id);
     MERGE INTO DIM_UBICACION d
     USING stg_clinica_user.STG_UBICACIONES s
     ON (d.BK_ID_UBICACION = s.ID_UBICACION)
@@ -259,19 +416,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_UBICACION ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_UBICACION: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_UBICACION;
 /
 
-
--- ============================================================================
--- (4/15) PROCEDIMIENTO: SP_LOAD_DIM_ESPECIALIDAD.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_ESPECIALIDAD (SCD Tipo 1)
 -- TABLA DESTINO: DIM_ESPECIALIDAD
@@ -280,13 +437,18 @@ END SP_LOAD_DIM_UBICACION;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_ESPECIALIDAD (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_ESPECIALIDAD', 'SP_LOAD_DIM_ESPECIALIDAD', v_tipo, v_audit_id);
     MERGE INTO DIM_ESPECIALIDAD d
     USING stg_clinica_user.STG_ESPECIALIDADES s
     ON (d.BK_ID_ESPECIALIDAD = s.ID_ESPECIALIDAD)
@@ -310,19 +472,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_ESPECIALIDAD ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_ESPECIALIDAD: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_ESPECIALIDAD;
 /
 
-
--- ============================================================================
--- (5/15) PROCEDIMIENTO: SP_LOAD_DIM_ENFERMEDAD.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_ENFERMEDAD (SCD Tipo 1)
 -- TABLA DESTINO: DIM_ENFERMEDAD
@@ -331,13 +493,18 @@ END SP_LOAD_DIM_ESPECIALIDAD;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_ENFERMEDAD (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_ENFERMEDAD', 'SP_LOAD_DIM_ENFERMEDAD', v_tipo, v_audit_id);
     MERGE INTO DIM_ENFERMEDAD d
     USING stg_clinica_user.STG_ENFERMEDADES s
     ON (d.BK_ID_ENFERMEDAD = s.ID_ENFERMEDAD)
@@ -361,19 +528,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_ENFERMEDAD ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_ENFERMEDAD: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_ENFERMEDAD;
 /
 
-
--- ============================================================================
--- (6/15) PROCEDIMIENTO: SP_LOAD_DIM_TIPO_CONSULTA.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_TIPO_CONSULTA (SCD Tipo 1)
 -- TABLA DESTINO: DIM_TIPO_CONSULTA
@@ -382,13 +549,18 @@ END SP_LOAD_DIM_ENFERMEDAD;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_TIPO_CONSULTA (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_TIPO_CONSULTA', 'SP_LOAD_DIM_TIPO_CONSULTA', v_tipo, v_audit_id);
     MERGE INTO DIM_TIPO_CONSULTA d
     USING stg_clinica_user.STG_TIPOS_CONSULTA s
     ON (d.BK_ID_TIPO_CONSULTA = s.ID_TIPO_CONSULTA)
@@ -414,19 +586,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_TIPO_CONSULTA ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_TIPO_CONSULTA: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_TIPO_CONSULTA;
 /
 
-
--- ============================================================================
--- (7/15) PROCEDIMIENTO: SP_LOAD_DIM_FORMA_PAGO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_FORMA_PAGO (SCD Tipo 1)
 -- TABLA DESTINO: DIM_FORMA_PAGO
@@ -435,13 +607,18 @@ END SP_LOAD_DIM_TIPO_CONSULTA;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_FORMA_PAGO (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_FORMA_PAGO', 'SP_LOAD_DIM_FORMA_PAGO', v_tipo, v_audit_id);
     MERGE INTO DIM_FORMA_PAGO d
     USING stg_clinica_user.STG_FORMAS_PAGO s
     ON (d.BK_ID_FORMA_PAGO = s.ID_FORMA_PAGO)
@@ -466,19 +643,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_FORMA_PAGO ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_FORMA_PAGO: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_FORMA_PAGO;
 /
 
-
--- ============================================================================
--- (8/15) PROCEDIMIENTO: SP_LOAD_DIM_PAGADOR.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_PAGADOR (SCD Tipo 1)
 -- TABLA DESTINO: DIM_PAGADOR
@@ -487,13 +664,18 @@ END SP_LOAD_DIM_FORMA_PAGO;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_PAGADOR (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_PAGADOR', 'SP_LOAD_DIM_PAGADOR', v_tipo, v_audit_id);
     MERGE INTO DIM_PAGADOR d
     USING (
         -- Pacientes Particulares
@@ -568,19 +750,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_PAGADOR ejecutado: ' || v_cant || ' filas afectadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_PAGADOR: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_PAGADOR;
 /
 
-
--- ============================================================================
--- (9/15) PROCEDIMIENTO: SP_LOAD_DIM_CLINICA.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_CLINICA (SCD Tipo 2)
 -- TABLA DESTINO: DIM_CLINICA
@@ -589,14 +771,19 @@ END SP_LOAD_DIM_PAGADOR;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_CLINICA (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_upd  NUMBER := 0;
     v_ins  NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_CLINICA', 'SP_LOAD_DIM_CLINICA', v_tipo, v_audit_id);
     -- 1. Caducar registros previos cuyos atributos descriptivos cambiaron (SCD Tipo 2)
     UPDATE DIM_CLINICA d
     SET d.CURRENTFLAG     = 0,
@@ -652,21 +839,20 @@ BEGIN
           ))
     );
     v_ins := SQL%ROWCOUNT;
-
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_CLINICA ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_CLINICA: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_CLINICA;
 /
 
-
--- ============================================================================
--- (10/15) PROCEDIMIENTO: SP_LOAD_DIM_MEDICO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_MEDICO (SCD Tipo 2)
 -- TABLA DESTINO: DIM_MEDICO
@@ -675,14 +861,19 @@ END SP_LOAD_DIM_CLINICA;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_MEDICO (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_upd  NUMBER := 0;
     v_ins  NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_MEDICO', 'SP_LOAD_DIM_MEDICO', v_tipo, v_audit_id);
     -- 1. Caducar registros previos cuyos atributos cambiaron (SCD Tipo 2)
     UPDATE DIM_MEDICO d
     SET d.CURRENTFLAG     = 0,
@@ -738,21 +929,20 @@ BEGIN
           ))
     );
     v_ins := SQL%ROWCOUNT;
-
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_MEDICO ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_MEDICO: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_MEDICO;
 /
 
-
--- ============================================================================
--- (11/15) PROCEDIMIENTO: SP_LOAD_DIM_PACIENTE.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_DIM_PACIENTE (SCD Tipo 2)
 -- TABLA DESTINO: DIM_PACIENTE
@@ -762,14 +952,19 @@ END SP_LOAD_DIM_MEDICO;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_PACIENTE (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_upd  NUMBER := 0;
     v_ins  NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_PACIENTE', 'SP_LOAD_DIM_PACIENTE', v_tipo, v_audit_id);
     -- 1. Caducar registros previos cuyos atributos cambiaron (SCD Tipo 2: Residencia, Convenios Empresa/Aseguradora)
     UPDATE DIM_PACIENTE d
     SET d.CURRENTFLAG     = 0,
@@ -847,21 +1042,20 @@ BEGIN
           ))
     );
     v_ins := SQL%ROWCOUNT;
-
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_PACIENTE ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_PACIENTE: ' || SQLERRM);
         RAISE;
 END SP_LOAD_DIM_PACIENTE;
 /
 
-
--- ============================================================================
--- (12/15) PROCEDIMIENTO: SP_LOAD_FACT_CONSULTAS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_FACT_CONSULTAS
 -- OBJETIVO:      Carga analítica de atenciones médicas y facturación acumulada
@@ -874,13 +1068,18 @@ END SP_LOAD_DIM_PACIENTE;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_CONSULTAS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_CONSULTAS', 'SP_LOAD_FACT_CONSULTAS', v_tipo, v_audit_id);
     MERGE INTO FACT_CONSULTAS f
     USING (
         WITH PROCEDIMIENTOS_AGREGADOS AS (
@@ -971,19 +1170,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_CONSULTAS ejecutado: ' || v_cant || ' filas procesadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_CONSULTAS: ' || SQLERRM);
         RAISE;
 END SP_LOAD_FACT_CONSULTAS;
 /
 
-
--- ============================================================================
--- (13/15) PROCEDIMIENTO: SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS
 -- OBJETIVO:      Carga del análisis epidemiológico y distribución del costo
@@ -994,13 +1193,18 @@ END SP_LOAD_FACT_CONSULTAS;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_CONSULTA_DIAGNOSTICOS', 'SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS', v_tipo, v_audit_id);
     MERGE INTO FACT_CONSULTA_DIAGNOSTICOS f
     USING (
         WITH CONTEO_DIAG AS (
@@ -1067,19 +1271,19 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS ejecutado: ' || v_cant || ' filas procesadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS: ' || SQLERRM);
         RAISE;
 END SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS;
 /
 
-
--- ============================================================================
--- (14/15) PROCEDIMIENTO: SP_LOAD_FACT_COBROS_DISTRIBUCION.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_LOAD_FACT_COBROS_DISTRIBUCION
 -- OBJETIVO:      Carga del análisis de recaudación, saldos por pagador
@@ -1091,13 +1295,18 @@ END SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_COBROS_DISTRIBUCION (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_cant NUMBER := 0;
     v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_COBROS_DISTRIBUCION', 'SP_LOAD_FACT_COBROS_DISTRIBUCION', v_tipo, v_audit_id);
     MERGE INTO FACT_COBROS_DISTRIBUCION f
     USING (
         WITH FORMA_PAGO_PREDOMINANTE AS (
@@ -1174,40 +1383,48 @@ BEGIN
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_COBROS_DISTRIBUCION ejecutado: ' || v_cant || ' filas procesadas.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_COBROS_DISTRIBUCION: ' || SQLERRM);
         RAISE;
 END SP_LOAD_FACT_COBROS_DISTRIBUCION;
 /
 
-
--- ============================================================================
--- (15/15) PROCEDIMIENTO: SP_LOAD_DWH_MASTER.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO MAESTRO: SP_LOAD_DWH_MASTER
 -- OBJETIVO: Orquestador end-to-end de extracción y carga analítica en el DWH.
 --           Invoca de forma modular y secuencial cada procedimiento individual
 --           por cada tabla de dimensión y tabla de hechos.
+--           Registra auditoría integral en CTL_ETL_AUDIT.
 -- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DWH_MASTER (
     p_tipo_carga    IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback IN NUMBER   DEFAULT 3,
-    p_fecha_corte   IN DATE     DEFAULT NULL
+    p_fecha_corte   IN DATE     DEFAULT NULL,
+    p_batch_id      IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
-    v_inicio TIMESTAMP := SYSTIMESTAMP;
-    v_tipo   VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
-    v_dias   NUMBER := NVL(p_dias_lookback, 3);
+    v_inicio   TIMESTAMP := SYSTIMESTAMP;
+    v_tipo     VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
+    v_dias     NUMBER := NVL(p_dias_lookback, 3);
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'ORCHESTRATOR', 'DWH_ALL', 'SP_LOAD_DWH_MASTER', v_tipo, v_audit_id);
+
     DBMS_OUTPUT.PUT_LINE('================================================================');
     DBMS_OUTPUT.PUT_LINE('INICIO DEL PIPELINE ANALÍTICO COMPLETO: DWH RED DE CLÍNICAS');
+    DBMS_OUTPUT.PUT_LINE('Batch ID: ' || v_batch_id);
     DBMS_OUTPUT.PUT_LINE('Modo de Carga: ' || v_tipo || 
                          ' | Ventana Días Lookback: ' || v_dias);
     DBMS_OUTPUT.PUT_LINE('Timestamp: ' || TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'));
@@ -1215,28 +1432,31 @@ BEGIN
 
     -- Paso 1: Extracción desde OLTP hacia Staging con ventana optimizada
     DBMS_OUTPUT.PUT_LINE('>>> 1. EJECUTANDO EXTRACCIÓN HACIA STAGING...');
-    stg_clinica_user.SP_EXTRACT_OLTP_TO_STG(v_tipo, v_dias, p_fecha_corte);
+    stg_clinica_user.SP_EXTRACT_OLTP_TO_STG(v_tipo, v_dias, p_fecha_corte, v_batch_id);
 
-    -- Paso 2: Carga de Dimensiones SCD Tipo 1 (Sobreescritura con Hash)
-    DBMS_OUTPUT.PUT_LINE('>>> 2. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 1...');
-    SP_LOAD_DIM_UBICACION(v_tipo);
-    SP_LOAD_DIM_ESPECIALIDAD(v_tipo);
-    SP_LOAD_DIM_ENFERMEDAD(v_tipo);
-    SP_LOAD_DIM_TIPO_CONSULTA(v_tipo);
-    SP_LOAD_DIM_FORMA_PAGO(v_tipo);
-    SP_LOAD_DIM_PAGADOR(v_tipo);
+    -- Paso 2: Carga de Dimensiones SCD Tipo 1 y Tiempo (Sobreescritura con Hash)
+    DBMS_OUTPUT.PUT_LINE('>>> 2. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 1 Y TIEMPO...');
+    SP_LOAD_DIM_TIEMPO(2024, 2030, v_batch_id);
+    SP_LOAD_DIM_UBICACION(v_tipo, v_batch_id);
+    SP_LOAD_DIM_ESPECIALIDAD(v_tipo, v_batch_id);
+    SP_LOAD_DIM_ENFERMEDAD(v_tipo, v_batch_id);
+    SP_LOAD_DIM_TIPO_CONSULTA(v_tipo, v_batch_id);
+    SP_LOAD_DIM_FORMA_PAGO(v_tipo, v_batch_id);
+    SP_LOAD_DIM_PAGADOR(v_tipo, v_batch_id);
 
     -- Paso 3: Carga de Dimensiones SCD Tipo 2 (Históricas / Caducidad + Nueva Versión)
     DBMS_OUTPUT.PUT_LINE('>>> 3. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 2...');
-    SP_LOAD_DIM_CLINICA(v_tipo);
-    SP_LOAD_DIM_MEDICO(v_tipo);
-    SP_LOAD_DIM_PACIENTE(v_tipo);
+    SP_LOAD_DIM_CLINICA(v_tipo, v_batch_id);
+    SP_LOAD_DIM_MEDICO(v_tipo, v_batch_id);
+    SP_LOAD_DIM_PACIENTE(v_tipo, v_batch_id);
 
     -- Paso 4: Carga de Tablas de Hechos (Fact Tables con SK Lookups)
     DBMS_OUTPUT.PUT_LINE('>>> 4. EJECUTANDO CARGA DE TABLAS DE HECHOS...');
-    SP_LOAD_FACT_CONSULTAS(v_tipo);
-    SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS(v_tipo);
-    SP_LOAD_FACT_COBROS_DISTRIBUCION(v_tipo);
+    SP_LOAD_FACT_CONSULTAS(v_tipo, v_batch_id);
+    SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS(v_tipo, v_batch_id);
+    SP_LOAD_FACT_COBROS_DISTRIBUCION(v_tipo, v_batch_id);
+
+    SP_AUDIT_END(v_audit_id, 0, 0, 0, 0, 'SUCCESS');
 
     DBMS_OUTPUT.PUT_LINE('================================================================');
     DBMS_OUTPUT.PUT_LINE('PIPELINE DWH MASTER FINALIZADO EXITOSAMENTE');
@@ -1246,8 +1466,10 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('*** ERROR CRÍTICO EN SP_LOAD_DWH_MASTER: ' || SQLERRM || ' ***');
         RAISE;
 END SP_LOAD_DWH_MASTER;
 /
-

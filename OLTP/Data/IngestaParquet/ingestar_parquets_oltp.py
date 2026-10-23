@@ -138,7 +138,7 @@ def main():
     parser.add_argument("--port", type=int, default=1521, help="Puerto de Oracle (default: 1521)")
     parser.add_argument("--service_name", default="XEPDB1", help="Service name / PDB (default: XEPDB1)")
     parser.add_argument("--user", default="red_clinica_user", help="Usuario OLTP (default: red_clinica_user)")
-    parser.add_argument("--password", default="red_clinica_user", help="Contraseña (default: red_clinica_user)")
+    parser.add_argument("--password", default="Password2026", help="Contraseña (default: red_clinica_user)")
     parser.add_argument("--data_dir", default=None, help="Ruta de los archivos parquet (default: OLTP/Data)")
     parser.add_argument("--batch_size", type=int, default=25000, help="Tamaño de lote para executemany (default: 25000)")
     parser.add_argument("--truncate", action="store_true", default=True, help="Limpiar/Truncar las 18 tablas antes de la ingesta (default: True)")

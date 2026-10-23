@@ -1,0 +1,508 @@
+<?xml version="1.0" ?>
+<workflow>
+  <name>wf_01_staging</name>
+  <name_sync_with_filename>Y</name_sync_with_filename>
+  <description>Orquestador de extracción OLTP hacia STAGING con auditoría nativa</description>
+  <extended_description/>
+  <workflow_version/>
+  <created_user>-</created_user>
+  <created_date>2026/10/22 14:45:00.000</created_date>
+  <modified_user>-</modified_user>
+  <modified_date>2026/10/22 14:45:00.000</modified_date>
+  <parameters>
+    <parameter>
+      <name>TIPO_CARGA</name>
+      <default_value>INCREMENTAL</default_value>
+      <description>Tipo de carga: FULL o INCREMENTAL</description>
+    </parameter>
+    <parameter>
+      <name>DIAS_LOOKBACK</name>
+      <default_value>3</default_value>
+      <description>Días de retroceso (ventana lookback)</description>
+    </parameter>
+    <parameter>
+      <name>FECHA_CORTE</name>
+      <default_value/>
+      <description>Fecha de corte específica (opcional, formato YYYY-MM-DD)</description>
+    </parameter>
+    <parameter>
+      <name>BATCH_ID</name>
+      <default_value/>
+      <description>Identificador único de lote</description>
+    </parameter>
+  </parameters>
+  <actions>
+    <action>
+      <name>Start</name>
+      <type>SPECIAL</type>
+      <start>Y</start>
+      <dummy>N</dummy>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <parallel>N</parallel>
+      <xloc>60</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_UBICACIONES</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_UBICACIONES(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>220</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_CLINICAS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_CLINICAS(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>400</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_EMPRESAS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_EMPRESAS(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>580</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_ASEGURADORAS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_ASEGURADORAS(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>760</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_PACIENTES</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_PACIENTES(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>940</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_ESPECIALIDADES</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_ESPECIALIDADES(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>1120</xloc>
+      <yloc>100</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_MEDICOS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_MEDICOS(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>220</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_MEDICOS_ESPECIALIDADES</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>400</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_ENFERMEDADES</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_ENFERMEDADES(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>580</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_TIPOS_CONSULTA</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_TIPOS_CONSULTA(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>760</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_PROCEDIMIENTOS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_PROCEDIMIENTOS(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>940</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_FORMAS_PAGO</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_FORMAS_PAGO(
+        p_tipo_carga =&gt; '${TIPO_CARGA}',
+        p_batch_id   =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>1120</xloc>
+      <yloc>220</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_CONSULTAS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_CONSULTAS(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>220</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_DIAGNOSTICOS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_DIAGNOSTICOS(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>420</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_CONSULTAS_PROCEDIMIENTOS</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>620</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_TRANSACCIONES_PAGO</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_TRANSACCIONES_PAGO(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>820</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_COBROS_CONSULTA</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_COBROS_CONSULTA(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>1020</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Extracción STG_DISTRIBUCION_COBRO</name>
+      <type>SQL</type>
+      <sql>BEGIN
+    stg_clinica_user.SP_EXTRACT_STG_DISTRIBUCION_COBRO(
+        p_tipo_carga     =&gt; '${TIPO_CARGA}',
+        p_dias_lookback  =&gt; TO_NUMBER('${DIAS_LOOKBACK}'),
+        p_fecha_corte    =&gt; CASE WHEN '${FECHA_CORTE}' IS NOT NULL AND '${FECHA_CORTE}' != '' THEN TO_DATE('${FECHA_CORTE}', 'YYYY-MM-DD') ELSE NULL END,
+        p_batch_id       =&gt; '${BATCH_ID}'
+    );
+END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>1220</xloc>
+      <yloc>340</yloc>
+    </action>
+    <action>
+      <name>Staging Finalizado</name>
+      <type>SUCCESS</type>
+      <parallel>N</parallel>
+      <xloc>1420</xloc>
+      <yloc>340</yloc>
+    </action>
+  </actions>
+  <hops>
+    <hop>
+      <from>Start</from>
+      <to>Extracción STG_UBICACIONES</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>Y</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_UBICACIONES</from>
+      <to>Extracción STG_CLINICAS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_CLINICAS</from>
+      <to>Extracción STG_EMPRESAS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_EMPRESAS</from>
+      <to>Extracción STG_ASEGURADORAS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_ASEGURADORAS</from>
+      <to>Extracción STG_PACIENTES</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_PACIENTES</from>
+      <to>Extracción STG_ESPECIALIDADES</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_ESPECIALIDADES</from>
+      <to>Extracción STG_MEDICOS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_MEDICOS</from>
+      <to>Extracción STG_MEDICOS_ESPECIALIDADES</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_MEDICOS_ESPECIALIDADES</from>
+      <to>Extracción STG_ENFERMEDADES</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_ENFERMEDADES</from>
+      <to>Extracción STG_TIPOS_CONSULTA</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_TIPOS_CONSULTA</from>
+      <to>Extracción STG_PROCEDIMIENTOS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_PROCEDIMIENTOS</from>
+      <to>Extracción STG_FORMAS_PAGO</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_FORMAS_PAGO</from>
+      <to>Extracción STG_CONSULTAS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_CONSULTAS</from>
+      <to>Extracción STG_DIAGNOSTICOS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_DIAGNOSTICOS</from>
+      <to>Extracción STG_CONSULTAS_PROCEDIMIENTOS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_CONSULTAS_PROCEDIMIENTOS</from>
+      <to>Extracción STG_TRANSACCIONES_PAGO</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_TRANSACCIONES_PAGO</from>
+      <to>Extracción STG_COBROS_CONSULTA</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_COBROS_CONSULTA</from>
+      <to>Extracción STG_DISTRIBUCION_COBRO</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Extracción STG_DISTRIBUCION_COBRO</from>
+      <to>Staging Finalizado</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+  </hops>
+  <notepads/>
+</workflow>

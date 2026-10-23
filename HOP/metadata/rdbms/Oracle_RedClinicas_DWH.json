@@ -1,0 +1,27 @@
+{
+  "rdbms": {
+    "ORACLE": {
+      "databaseName": "XEPDB1",
+      "pluginId": "ORACLE",
+      "accessType": 0,
+      "hostname": "localhost",
+      "password": "Encrypted 2be98afc86ae3858c9b18bd638cc2fd8c",
+      "pluginName": "Oracle",
+      "port": "1521",
+      "connectionType": "SERVICE_NAME",
+      "username": "dwh_clinica_user",
+      "attributes": {
+        "FORCE_IDENTIFIERS_TO_LOWERCASE": "N",
+        "FORCE_IDENTIFIERS_TO_UPPERCASE": "N",
+        "IS_CLUSTERED": "N",
+        "PORT_NUMBER": "1521",
+        "PRESERVE_RESERVED_WORD_CASE": "Y",
+        "QUOTE_ALL_FIELDS": "N",
+        "SUPPORTS_BOOLEAN_DATA_TYPE": "Y",
+        "SUPPORTS_TIMESTAMP_DATA_TYPE": "Y",
+        "USE_POOLING": "N"
+      }
+    }
+  },
+  "name": "Oracle_RedClinicas_DWH"
+}

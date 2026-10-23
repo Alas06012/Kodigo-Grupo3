@@ -6,7 +6,8 @@
 
 CREATE OR REPLACE PROCEDURE SP_POBLAR_DIM_TIEMPO (
     p_anio_inicio IN NUMBER DEFAULT 2024,
-    p_anio_fin    IN NUMBER DEFAULT 2030
+    p_anio_fin    IN NUMBER   DEFAULT 2030,
+    p_batch_id    IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
@@ -14,7 +15,11 @@ IS
     v_fecha_fin    DATE;
     v_total_dias   NUMBER;
     v_insertados   NUMBER := 0;
+    v_batch_id     VARCHAR2(50);
+    v_audit_id     NUMBER;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_TIEMPO', 'SP_POBLAR_DIM_TIEMPO', 'FULL', v_audit_id);
     v_fecha_inicio := TO_DATE(p_anio_inicio || '-01-01', 'YYYY-MM-DD');
     v_fecha_fin    := TO_DATE(p_anio_fin || '-12-31', 'YYYY-MM-DD');
     v_total_dias   := (v_fecha_fin - v_fecha_inicio) + 1;
@@ -171,10 +176,14 @@ BEGIN
 
     v_insertados := SQL%ROWCOUNT;
     COMMIT;
+    SP_AUDIT_END(v_audit_id, v_insertados, v_insertados, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('DIM_TIEMPO poblada exitosamente: ' || v_insertados || ' días registrados.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error poblando DIM_TIEMPO: ' || SQLERRM);
         RAISE;
 END SP_POBLAR_DIM_TIEMPO;

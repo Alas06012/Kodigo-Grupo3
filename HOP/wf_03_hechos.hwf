@@ -1,0 +1,111 @@
+<?xml version="1.0" ?>
+<workflow>
+  <name>wf_03_hechos</name>
+  <name_sync_with_filename>Y</name_sync_with_filename>
+  <description>Orquestador de carga de Tablas de Hechos con resolución de SK</description>
+  <extended_description/>
+  <workflow_version/>
+  <created_user>-</created_user>
+  <created_date>2026/10/22 14:45:00.000</created_date>
+  <modified_user>-</modified_user>
+  <modified_date>2026/10/22 14:45:00.000</modified_date>
+  <parameters>
+    <parameter>
+      <name>TIPO_CARGA</name>
+      <default_value>INCREMENTAL</default_value>
+      <description>Tipo de carga: FULL o INCREMENTAL</description>
+    </parameter>
+    <parameter>
+      <name>BATCH_ID</name>
+      <default_value/>
+      <description>Identificador único de lote</description>
+    </parameter>
+  </parameters>
+  <actions>
+    <action>
+      <name>Start</name>
+      <type>SPECIAL</type>
+      <start>Y</start>
+      <dummy>N</dummy>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <parallel>N</parallel>
+      <xloc>80</xloc>
+      <yloc>120</yloc>
+    </action>
+    <action>
+      <name>Carga FACT_CONSULTAS</name>
+      <type>SQL</type>
+      <sql>BEGIN dwh_clinica_user.SP_LOAD_FACT_CONSULTAS('${TIPO_CARGA}', '${BATCH_ID}'); END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>280</xloc>
+      <yloc>120</yloc>
+    </action>
+    <action>
+      <name>Carga FACT_CONSULTA_DIAGNOSTICOS</name>
+      <type>SQL</type>
+      <sql>BEGIN dwh_clinica_user.SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS('${TIPO_CARGA}', '${BATCH_ID}'); END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>520</xloc>
+      <yloc>120</yloc>
+    </action>
+    <action>
+      <name>Carga FACT_COBROS_DISTRIBUCION</name>
+      <type>SQL</type>
+      <sql>BEGIN dwh_clinica_user.SP_LOAD_FACT_COBROS_DISTRIBUCION('${TIPO_CARGA}', '${BATCH_ID}'); END;</sql>
+      <useVariableSubstitution>Y</useVariableSubstitution>
+      <sqlfromfile>N</sqlfromfile>
+      <sendOneStatement>Y</sendOneStatement>
+      <connection>Oracle_RedClinicas_DWH</connection>
+      <parallel>N</parallel>
+      <xloc>760</xloc>
+      <yloc>120</yloc>
+    </action>
+    <action>
+      <name>Hechos Finalizados</name>
+      <type>SUCCESS</type>
+      <parallel>N</parallel>
+      <xloc>1000</xloc>
+      <yloc>120</yloc>
+    </action>
+  </actions>
+  <hops>
+    <hop>
+      <from>Start</from>
+      <to>Carga FACT_CONSULTAS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>Y</unconditional>
+    </hop>
+    <hop>
+      <from>Carga FACT_CONSULTAS</from>
+      <to>Carga FACT_CONSULTA_DIAGNOSTICOS</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Carga FACT_CONSULTA_DIAGNOSTICOS</from>
+      <to>Carga FACT_COBROS_DISTRIBUCION</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+    <hop>
+      <from>Carga FACT_COBROS_DISTRIBUCION</from>
+      <to>Hechos Finalizados</to>
+      <enabled>Y</enabled>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+    </hop>
+  </hops>
+  <notepads/>
+</workflow>

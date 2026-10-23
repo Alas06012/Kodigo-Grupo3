@@ -1,16 +1,20 @@
 /* ============================================================================
-   PROYECTO DATA WAREHOUSE - RED DE CLINICAS
-   MASTER DDL/PLSQL: COMPILACION DE TODOS LOS STORED PROCEDURES DE STAGING (19)
-   ESQUEMA: stg_clinica_user | MOTOR: Oracle Database (XEPDB1)
+   PROYECTO DATA WAREHOUSE - RED ASISTENCIAL DE CLÍNICAS
+   COMPILACIÓN CONSOLIDADA DE TODOS LOS STORED PROCEDURES DE STAGING
+   MOTOR: Oracle Database 19c / 21c / 23ai
+   ESQUEMA: stg_clinica_user | TABLESPACE: stg_clinicas_db
+   ============================================================================
+   INSTRUCCIONES DE EJECUCIÓN:
+     - Conectarse en SQL Developer, DBeaver, VS Code o SQL*Plus como: stg_clinica_user
+     - Este script compila los 19 stored procedures de extracción (18 tablas + maestro)
+       instrumentados con auditoría nativa en dwh_clinica_user.CTL_ETL_AUDIT.
    ============================================================================ */
 
--- Permite ver los mensajes de DBMS_OUTPUT en consolas SQL*Plus / SQLcl / DBeaver
-SET SERVEROUTPUT ON SIZE UNLIMITED;
+SET FEEDBACK ON;
+SET ECHO OFF;
 
 
--- ============================================================================
--- (1/19) PROCEDIMIENTO: SP_EXTRACT_STG_UBICACIONES.sql
--- ============================================================================
+
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_UBICACIONES
 -- OBJETIVO:      Extracción directa desde red_clinica_user.UBICACIONES hacia STG_UBICACIONES
@@ -18,13 +22,18 @@ SET SERVEROUTPUT ON SIZE UNLIMITED;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_UBICACIONES (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_UBICACIONES', 'SP_EXTRACT_STG_UBICACIONES', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_UBICACIONES';
 
     INSERT /*+ APPEND */ INTO STG_UBICACIONES (
@@ -46,10 +55,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_UBICACIONES extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_UBICACIONES: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_UBICACIONES;
@@ -57,10 +70,6 @@ END SP_EXTRACT_STG_UBICACIONES;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_UBICACIONES TO dwh_clinica_user;
 
-
--- ============================================================================
--- (2/19) PROCEDIMIENTO: SP_EXTRACT_STG_CLINICAS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_CLINICAS
 -- OBJETIVO:      Extracción directa desde red_clinica_user.CLINICAS hacia STG_CLINICAS
@@ -68,13 +77,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_UBICACIONES TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_CLINICAS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_CLINICAS', 'SP_EXTRACT_STG_CLINICAS', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_CLINICAS';
 
     INSERT /*+ APPEND */ INTO STG_CLINICAS (
@@ -109,10 +123,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_CLINICAS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_CLINICAS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_CLINICAS;
@@ -120,10 +138,6 @@ END SP_EXTRACT_STG_CLINICAS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_CLINICAS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (3/19) PROCEDIMIENTO: SP_EXTRACT_STG_EMPRESAS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_EMPRESAS
 -- OBJETIVO:      Extracción directa desde red_clinica_user.EMPRESAS hacia STG_EMPRESAS
@@ -131,13 +145,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_CLINICAS TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_EMPRESAS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_EMPRESAS', 'SP_EXTRACT_STG_EMPRESAS', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_EMPRESAS';
 
     INSERT /*+ APPEND */ INTO STG_EMPRESAS (
@@ -159,10 +178,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_EMPRESAS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_EMPRESAS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_EMPRESAS;
@@ -170,10 +193,6 @@ END SP_EXTRACT_STG_EMPRESAS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_EMPRESAS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (4/19) PROCEDIMIENTO: SP_EXTRACT_STG_ASEGURADORAS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_ASEGURADORAS
 -- OBJETIVO:      Extracción directa desde red_clinica_user.ASEGURADORAS hacia stg_clinica_user.STG_ASEGURADORAS
@@ -181,13 +200,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_EMPRESAS TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_ASEGURADORAS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_ASEGURADORAS', 'SP_EXTRACT_STG_ASEGURADORAS', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_ASEGURADORAS';
 
     INSERT /*+ APPEND */ INTO STG_ASEGURADORAS (
@@ -223,11 +247,15 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_ASEGURADORAS extraída: ' || v_filas || ' registros.');
 
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_ASEGURADORAS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_ASEGURADORAS;
@@ -235,10 +263,6 @@ END SP_EXTRACT_STG_ASEGURADORAS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_ASEGURADORAS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (5/19) PROCEDIMIENTO: SP_EXTRACT_STG_PACIENTES.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_PACIENTES
 -- OBJETIVO:      Extracción directa desde red_clinica_user.PACIENTES hacia STG_PACIENTES
@@ -246,13 +270,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_ASEGURADORAS TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_PACIENTES (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_PACIENTES', 'SP_EXTRACT_STG_PACIENTES', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_PACIENTES';
 
     INSERT /*+ APPEND */ INTO STG_PACIENTES (
@@ -281,10 +310,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_PACIENTES extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_PACIENTES: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_PACIENTES;
@@ -292,10 +325,6 @@ END SP_EXTRACT_STG_PACIENTES;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_PACIENTES TO dwh_clinica_user;
 
-
--- ============================================================================
--- (6/19) PROCEDIMIENTO: SP_EXTRACT_STG_ESPECIALIDADES.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_ESPECIALIDADES
 -- OBJETIVO:      Extracción directa desde red_clinica_user.ESPECIALIDADES hacia STG_ESPECIALIDADES
@@ -303,13 +332,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_PACIENTES TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_ESPECIALIDADES (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_ESPECIALIDADES', 'SP_EXTRACT_STG_ESPECIALIDADES', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_ESPECIALIDADES';
 
     INSERT /*+ APPEND */ INTO STG_ESPECIALIDADES (
@@ -328,10 +362,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_ESPECIALIDADES extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_ESPECIALIDADES: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_ESPECIALIDADES;
@@ -339,10 +377,6 @@ END SP_EXTRACT_STG_ESPECIALIDADES;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_ESPECIALIDADES TO dwh_clinica_user;
 
-
--- ============================================================================
--- (7/19) PROCEDIMIENTO: SP_EXTRACT_STG_MEDICOS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_MEDICOS
 -- OBJETIVO:      Extracción directa desde red_clinica_user.MEDICOS hacia STG_MEDICOS
@@ -350,13 +384,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_ESPECIALIDADES TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_MEDICOS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_MEDICOS', 'SP_EXTRACT_STG_MEDICOS', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_MEDICOS';
 
     INSERT /*+ APPEND */ INTO STG_MEDICOS (
@@ -379,10 +418,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_MEDICOS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_MEDICOS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_MEDICOS;
@@ -390,10 +433,6 @@ END SP_EXTRACT_STG_MEDICOS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_MEDICOS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (8/19) PROCEDIMIENTO: SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES
 -- OBJETIVO:      Extracción directa desde red_clinica_user.MEDICOS_ESPECIALIDADES hacia STG_MEDICOS_ESPECIALIDADES
@@ -401,13 +440,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_MEDICOS TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_MEDICOS_ESPECIALIDADES', 'SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_MEDICOS_ESPECIALIDADES';
 
     INSERT /*+ APPEND */ INTO STG_MEDICOS_ESPECIALIDADES (
@@ -428,10 +472,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_MEDICOS_ESPECIALIDADES extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES;
@@ -439,10 +487,6 @@ END SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES TO dwh_clinica_user;
 
-
--- ============================================================================
--- (9/19) PROCEDIMIENTO: SP_EXTRACT_STG_ENFERMEDADES.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_ENFERMEDADES
 -- OBJETIVO:      Extracción directa desde red_clinica_user.ENFERMEDADES hacia STG_ENFERMEDADES
@@ -450,13 +494,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_ENFERMEDADES (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_ENFERMEDADES', 'SP_EXTRACT_STG_ENFERMEDADES', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_ENFERMEDADES';
 
     INSERT /*+ APPEND */ INTO STG_ENFERMEDADES (
@@ -475,10 +524,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_ENFERMEDADES extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_ENFERMEDADES: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_ENFERMEDADES;
@@ -486,10 +539,6 @@ END SP_EXTRACT_STG_ENFERMEDADES;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_ENFERMEDADES TO dwh_clinica_user;
 
-
--- ============================================================================
--- (10/19) PROCEDIMIENTO: SP_EXTRACT_STG_TIPOS_CONSULTA.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_TIPOS_CONSULTA
 -- OBJETIVO:      Extracción directa desde red_clinica_user.TIPOS_CONSULTA hacia STG_TIPOS_CONSULTA
@@ -497,13 +546,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_ENFERMEDADES TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_TIPOS_CONSULTA (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_TIPOS_CONSULTA', 'SP_EXTRACT_STG_TIPOS_CONSULTA', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_TIPOS_CONSULTA';
 
     INSERT /*+ APPEND */ INTO STG_TIPOS_CONSULTA (
@@ -524,10 +578,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_TIPOS_CONSULTA extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_TIPOS_CONSULTA: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_TIPOS_CONSULTA;
@@ -535,10 +593,6 @@ END SP_EXTRACT_STG_TIPOS_CONSULTA;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_TIPOS_CONSULTA TO dwh_clinica_user;
 
-
--- ============================================================================
--- (11/19) PROCEDIMIENTO: SP_EXTRACT_STG_PROCEDIMIENTOS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_PROCEDIMIENTOS
 -- OBJETIVO:      Extracción directa desde red_clinica_user.PROCEDIMIENTOS hacia STG_PROCEDIMIENTOS
@@ -546,13 +600,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_TIPOS_CONSULTA TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_PROCEDIMIENTOS (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_PROCEDIMIENTOS', 'SP_EXTRACT_STG_PROCEDIMIENTOS', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_PROCEDIMIENTOS';
 
     INSERT /*+ APPEND */ INTO STG_PROCEDIMIENTOS (
@@ -574,10 +633,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_PROCEDIMIENTOS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_PROCEDIMIENTOS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_PROCEDIMIENTOS;
@@ -585,10 +648,6 @@ END SP_EXTRACT_STG_PROCEDIMIENTOS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_PROCEDIMIENTOS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (12/19) PROCEDIMIENTO: SP_EXTRACT_STG_FORMAS_PAGO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_FORMAS_PAGO
 -- OBJETIVO:      Extracción directa desde red_clinica_user.FORMAS_PAGO hacia STG_FORMAS_PAGO
@@ -596,13 +655,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_PROCEDIMIENTOS TO dwh_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_FORMAS_PAGO (
-    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL'
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_FORMAS_PAGO', 'SP_EXTRACT_STG_FORMAS_PAGO', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_FORMAS_PAGO';
 
     INSERT /*+ APPEND */ INTO STG_FORMAS_PAGO (
@@ -622,10 +686,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_FORMAS_PAGO extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_FORMAS_PAGO: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_FORMAS_PAGO;
@@ -633,10 +701,6 @@ END SP_EXTRACT_STG_FORMAS_PAGO;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_FORMAS_PAGO TO dwh_clinica_user;
 
-
--- ============================================================================
--- (13/19) PROCEDIMIENTO: SP_EXTRACT_STG_CONSULTAS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_CONSULTAS
 -- OBJETIVO:      Extracción de atenciones médicas desde red_clinica_user.CONSULTAS
@@ -647,15 +711,20 @@ GRANT EXECUTE ON SP_EXTRACT_STG_FORMAS_PAGO TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_CONSULTAS (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias         NUMBER := NVL(p_dias_lookback, 3);
     v_fecha_filtro DATE;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_CONSULTAS', 'SP_EXTRACT_STG_CONSULTAS', v_tipo, v_audit_id);
     IF v_tipo = 'INCREMENTAL' THEN
         IF p_fecha_corte IS NOT NULL THEN
             v_fecha_filtro := TRUNC(p_fecha_corte);
@@ -693,10 +762,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_CONSULTAS extraída (Ventana >= ' || TO_CHAR(v_fecha_filtro, 'YYYY-MM-DD') || '): ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_CONSULTAS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_CONSULTAS;
@@ -704,10 +777,6 @@ END SP_EXTRACT_STG_CONSULTAS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_CONSULTAS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (14/19) PROCEDIMIENTO: SP_EXTRACT_STG_DIAGNOSTICOS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_DIAGNOSTICOS
 -- OBJETIVO:      Extracción de diagnósticos clínicos desde red_clinica_user.DIAGNOSTICOS
@@ -718,15 +787,20 @@ GRANT EXECUTE ON SP_EXTRACT_STG_CONSULTAS TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_DIAGNOSTICOS (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias         NUMBER := NVL(p_dias_lookback, 3);
     v_fecha_filtro DATE;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_DIAGNOSTICOS', 'SP_EXTRACT_STG_DIAGNOSTICOS', v_tipo, v_audit_id);
     IF v_tipo = 'INCREMENTAL' THEN
         IF p_fecha_corte IS NOT NULL THEN
             v_fecha_filtro := TRUNC(p_fecha_corte);
@@ -759,10 +833,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_DIAGNOSTICOS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_DIAGNOSTICOS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_DIAGNOSTICOS;
@@ -770,10 +848,6 @@ END SP_EXTRACT_STG_DIAGNOSTICOS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_DIAGNOSTICOS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (15/19) PROCEDIMIENTO: SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS
 -- OBJETIVO:      Extracción de procedimientos aplicados desde 
@@ -785,15 +859,20 @@ GRANT EXECUTE ON SP_EXTRACT_STG_DIAGNOSTICOS TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias         NUMBER := NVL(p_dias_lookback, 3);
     v_fecha_filtro DATE;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_CONSULTAS_PROCEDIMIENTOS', 'SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS', v_tipo, v_audit_id);
     IF v_tipo = 'INCREMENTAL' THEN
         IF p_fecha_corte IS NOT NULL THEN
             v_fecha_filtro := TRUNC(p_fecha_corte);
@@ -831,10 +910,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_CONSULTAS_PROCEDIMIENTOS extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS;
@@ -842,10 +925,6 @@ END SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS TO dwh_clinica_user;
 
-
--- ============================================================================
--- (16/19) PROCEDIMIENTO: SP_EXTRACT_STG_TRANSACCIONES_PAGO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_TRANSACCIONES_PAGO
 -- OBJETIVO:      Extracción del libro diario de pagos desde 
@@ -857,15 +936,20 @@ GRANT EXECUTE ON SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_TRANSACCIONES_PAGO (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias         NUMBER := NVL(p_dias_lookback, 3);
     v_fecha_filtro DATE;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_TRANSACCIONES_PAGO', 'SP_EXTRACT_STG_TRANSACCIONES_PAGO', v_tipo, v_audit_id);
     IF v_tipo = 'INCREMENTAL' THEN
         IF p_fecha_corte IS NOT NULL THEN
             v_fecha_filtro := TRUNC(p_fecha_corte);
@@ -903,10 +987,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_TRANSACCIONES_PAGO extraída (Ventana >= ' || TO_CHAR(v_fecha_filtro, 'YYYY-MM-DD') || '): ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_TRANSACCIONES_PAGO: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_TRANSACCIONES_PAGO;
@@ -914,10 +1002,6 @@ END SP_EXTRACT_STG_TRANSACCIONES_PAGO;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_TRANSACCIONES_PAGO TO dwh_clinica_user;
 
-
--- ============================================================================
--- (17/19) PROCEDIMIENTO: SP_EXTRACT_STG_COBROS_CONSULTA.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_COBROS_CONSULTA
 -- OBJETIVO:      Extracción del estado de cuenta médico desde 
@@ -929,15 +1013,20 @@ GRANT EXECUTE ON SP_EXTRACT_STG_TRANSACCIONES_PAGO TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_COBROS_CONSULTA (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas        NUMBER := 0;
     v_tipo         VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias         NUMBER := NVL(p_dias_lookback, 3);
     v_fecha_filtro DATE;
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_COBROS_CONSULTA', 'SP_EXTRACT_STG_COBROS_CONSULTA', v_tipo, v_audit_id);
     IF v_tipo = 'INCREMENTAL' THEN
         IF p_fecha_corte IS NOT NULL THEN
             v_fecha_filtro := TRUNC(p_fecha_corte);
@@ -975,10 +1064,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_COBROS_CONSULTA extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_COBROS_CONSULTA: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_COBROS_CONSULTA;
@@ -986,10 +1079,6 @@ END SP_EXTRACT_STG_COBROS_CONSULTA;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_COBROS_CONSULTA TO dwh_clinica_user;
 
-
--- ============================================================================
--- (18/19) PROCEDIMIENTO: SP_EXTRACT_STG_DISTRIBUCION_COBRO.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO: SP_EXTRACT_STG_DISTRIBUCION_COBRO
 -- OBJETIVO:      Extracción del desglose de cobro por pagador desde 
@@ -1001,13 +1090,18 @@ GRANT EXECUTE ON SP_EXTRACT_STG_COBROS_CONSULTA TO dwh_clinica_user;
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_STG_DISTRIBUCION_COBRO (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
     v_filas NUMBER := 0;
     v_tipo  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
 BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STG_DISTRIBUCION_COBRO', 'SP_EXTRACT_STG_DISTRIBUCION_COBRO', v_tipo, v_audit_id);
     EXECUTE IMMEDIATE 'TRUNCATE TABLE STG_DISTRIBUCION_COBRO';
 
     INSERT /*+ APPEND */ INTO STG_DISTRIBUCION_COBRO (
@@ -1037,10 +1131,14 @@ BEGIN
 
     v_filas := SQL%ROWCOUNT;
     COMMIT;
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, v_filas, v_filas, 0, 0, 'SUCCESS');
     DBMS_OUTPUT.PUT_LINE('STG_DISTRIBUCION_COBRO extraída: ' || v_filas || ' registros.');
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('Error en SP_EXTRACT_STG_DISTRIBUCION_COBRO: ' || SQLERRM);
         RAISE;
 END SP_EXTRACT_STG_DISTRIBUCION_COBRO;
@@ -1048,63 +1146,69 @@ END SP_EXTRACT_STG_DISTRIBUCION_COBRO;
 
 GRANT EXECUTE ON SP_EXTRACT_STG_DISTRIBUCION_COBRO TO dwh_clinica_user;
 
-
--- ============================================================================
--- (19/19) PROCEDIMIENTO: SP_EXTRACT_OLTP_TO_STG.sql
--- ============================================================================
 -- ============================================================================
 -- PROCEDIMIENTO MAESTRO: SP_EXTRACT_OLTP_TO_STG
 -- OBJETIVO: Orquestador general de la extracción OLTP -> Staging.
 --           Invoca de forma modular y secuencial cada procedimiento individual
 --           por cada tabla origen, preservando el cálculo de SHA-256 al vuelo
 --           y la ventana incremental (Lookback).
+--           Registra auditoría integral en CTL_ETL_AUDIT.
 -- ESQUEMA:  stg_clinica_user | MOTOR: Oracle Database
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_EXTRACT_OLTP_TO_STG (
     p_tipo_carga     IN VARCHAR2 DEFAULT 'INCREMENTAL',
     p_dias_lookback  IN NUMBER   DEFAULT 3,
-    p_fecha_corte    IN DATE     DEFAULT NULL
+    p_fecha_corte    IN DATE     DEFAULT NULL,
+    p_batch_id       IN VARCHAR2 DEFAULT NULL
 )
 AUTHID DEFINER
 IS
     v_inicio_proc TIMESTAMP := SYSTIMESTAMP;
     v_tipo_carga  VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
     v_dias        NUMBER := NVL(p_dias_lookback, 3);
+    v_batch_id    VARCHAR2(50);
+    v_audit_id    NUMBER;
 BEGIN
     IF v_tipo_carga NOT IN ('FULL', 'INCREMENTAL') THEN
         RAISE_APPLICATION_ERROR(-20010, 'Parámetro p_tipo_carga inválido. Debe ser FULL o INCREMENTAL.');
     END IF;
 
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    dwh_clinica_user.SP_AUDIT_START(v_batch_id, 'STAGING', 'STAGING_ALL', 'SP_EXTRACT_OLTP_TO_STG', v_tipo_carga, v_audit_id);
+
     DBMS_OUTPUT.PUT_LINE('================================================================');
     DBMS_OUTPUT.PUT_LINE('INICIO PROCESO DE EXTRACCIÓN: OLTP (red_clinica_user) -> STAGING');
+    DBMS_OUTPUT.PUT_LINE('Batch ID: ' || v_batch_id);
     DBMS_OUTPUT.PUT_LINE('Modo de Carga: ' || v_tipo_carga || ' | Ventana Días Lookback: ' || v_dias);
     DBMS_OUTPUT.PUT_LINE('Timestamp: ' || TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'));
     DBMS_OUTPUT.PUT_LINE('================================================================');
 
     -- BLOQUE 1: CATÁLOGOS Y ENTIDADES MAESTRAS
     DBMS_OUTPUT.PUT_LINE('>>> 1. Extrayendo Catálogos y Entidades Maestras...');
-    SP_EXTRACT_STG_UBICACIONES(v_tipo_carga);
-    SP_EXTRACT_STG_CLINICAS(v_tipo_carga);
-    SP_EXTRACT_STG_EMPRESAS(v_tipo_carga);
-    SP_EXTRACT_STG_ASEGURADORAS(v_tipo_carga);
-    SP_EXTRACT_STG_PACIENTES(v_tipo_carga);
-    SP_EXTRACT_STG_ESPECIALIDADES(v_tipo_carga);
-    SP_EXTRACT_STG_MEDICOS(v_tipo_carga);
-    SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES(v_tipo_carga);
-    SP_EXTRACT_STG_ENFERMEDADES(v_tipo_carga);
-    SP_EXTRACT_STG_TIPOS_CONSULTA(v_tipo_carga);
-    SP_EXTRACT_STG_PROCEDIMIENTOS(v_tipo_carga);
-    SP_EXTRACT_STG_FORMAS_PAGO(v_tipo_carga);
+    SP_EXTRACT_STG_UBICACIONES(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_CLINICAS(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_EMPRESAS(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_ASEGURADORAS(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_PACIENTES(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_ESPECIALIDADES(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_MEDICOS(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_MEDICOS_ESPECIALIDADES(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_ENFERMEDADES(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_TIPOS_CONSULTA(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_PROCEDIMIENTOS(v_tipo_carga, v_batch_id);
+    SP_EXTRACT_STG_FORMAS_PAGO(v_tipo_carga, v_batch_id);
 
     -- BLOQUE 2: TABLAS TRANSACCIONALES MASIVAS (VENTANA INCREMENTAL)
     DBMS_OUTPUT.PUT_LINE('>>> 2. Extrayendo Transacciones Masivas (Ventana Lookback)...');
-    SP_EXTRACT_STG_CONSULTAS(v_tipo_carga, v_dias, p_fecha_corte);
-    SP_EXTRACT_STG_DIAGNOSTICOS(v_tipo_carga, v_dias, p_fecha_corte);
-    SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS(v_tipo_carga, v_dias, p_fecha_corte);
-    SP_EXTRACT_STG_TRANSACCIONES_PAGO(v_tipo_carga, v_dias, p_fecha_corte);
-    SP_EXTRACT_STG_COBROS_CONSULTA(v_tipo_carga, v_dias, p_fecha_corte);
-    SP_EXTRACT_STG_DISTRIBUCION_COBRO(v_tipo_carga, v_dias, p_fecha_corte);
+    SP_EXTRACT_STG_CONSULTAS(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+    SP_EXTRACT_STG_DIAGNOSTICOS(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+    SP_EXTRACT_STG_CONSULTAS_PROCEDIMIENTOS(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+    SP_EXTRACT_STG_TRANSACCIONES_PAGO(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+    SP_EXTRACT_STG_COBROS_CONSULTA(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+    SP_EXTRACT_STG_DISTRIBUCION_COBRO(v_tipo_carga, v_dias, p_fecha_corte, v_batch_id);
+
+    dwh_clinica_user.SP_AUDIT_END(v_audit_id, 0, 0, 0, 0, 'SUCCESS');
 
     DBMS_OUTPUT.PUT_LINE('================================================================');
     DBMS_OUTPUT.PUT_LINE('EXTRACCIÓN OPTIMIZADA A STAGING COMPLETADA EXITOSAMENTE');
@@ -1114,13 +1218,12 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            dwh_clinica_user.SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
         DBMS_OUTPUT.PUT_LINE('*** ERROR CRÍTICO EN SP_EXTRACT_OLTP_TO_STG: ' || SQLERRM || ' ***');
         RAISE;
 END SP_EXTRACT_OLTP_TO_STG;
 /
 
--- Otorgar privilegios de ejecución al usuario del Data Warehouse
 GRANT EXECUTE ON SP_EXTRACT_OLTP_TO_STG TO dwh_clinica_user;
-
-COMMIT;
-
