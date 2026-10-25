@@ -26,3 +26,5 @@ CREATE TABLE CONSULTAS (
 COMMENT ON TABLE  CONSULTAS IS 'Registro de actos médicos efectuados';
 COMMENT ON COLUMN CONSULTAS.PRECIO_CONSULTA IS 'Valor pactado para los honorarios médicos de esta cita';
 COMMENT ON COLUMN CONSULTAS.PRESCRIPCION    IS 'Receta médica con medicamentos e indicaciones emitidas al paciente';
+
+GRANT SELECT ON CONSULTAS TO stg_clinica_user, dwh_clinica_user;

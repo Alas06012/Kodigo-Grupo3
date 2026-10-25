@@ -25,3 +25,4 @@ CREATE TABLE STG_EMPRESAS (
 CREATE INDEX IX_STG_EMP_ID ON STG_EMPRESAS (ID_EMPRESA);
 COMMENT ON TABLE STG_EMPRESAS IS 'Staging: Empresas afiliadas con convenios de salud laboral';
 
+GRANT SELECT ON STG_EMPRESAS TO dwh_clinica_user;

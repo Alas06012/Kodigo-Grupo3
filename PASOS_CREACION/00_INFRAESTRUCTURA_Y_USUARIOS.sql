@@ -1,4 +1,22 @@
 /* ============================================================================
+   PASO 00: INFRAESTRUCTURA, TABLESPACES, USUARIOS Y PRIVILEGIOS
+   ============================================================================
+   USUARIO DE CONEXION: SYS AS SYSDBA o SYSTEM
+   CONTENEDOR (PDB):    XEPDB1
+   HOST / PUERTO:       localhost:1521
+   ============================================================================
+   INSTRUCCIONES DE EJECUCION:
+     1. Conectate a Oracle con tu cliente SQL (SQL Developer, DBeaver, VS Code
+        o SQL*Plus) usando el usuario SYS (como SYSDBA) o SYSTEM.
+     2. Asegurate de estar en el contenedor PDB: XEPDB1.
+     3. Ejecuta este script completo para crear los 3 tablespaces fisicos
+        y los 3 esquemas de base de datos con sus cuotas y permisos:
+        - red_clinica_user  / Password2026   (Capa OLTP Transaccional)
+        - stg_clinica_user  / StagingPass2026 (Capa Staging / Landing)
+        - dwh_clinica_user  / DwhPass2026     (Capa Data Warehouse Kimball)
+   ============================================================================ */
+
+/* ============================================================================
    PROYECTO DATA WAREHOUSE - RED ASISTENCIAL DE CLÍNICAS
    SCRIPT MAESTRO: CONFIGURACIÓN DE TABLESPACES, USUARIOS Y PRIVILEGIOS
    MOTOR: Oracle Database 19c / 21c / 23ai

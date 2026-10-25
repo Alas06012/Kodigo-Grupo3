@@ -16,3 +16,5 @@ CREATE TABLE DIAGNOSTICOS (
 );
 
 COMMENT ON TABLE DIAGNOSTICOS IS 'Diagnósticos identificados en una consulta (cardinalidad N:M)';
+
+GRANT SELECT ON DIAGNOSTICOS TO stg_clinica_user, dwh_clinica_user;

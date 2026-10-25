@@ -15,3 +15,5 @@ CREATE TABLE FORMAS_PAGO (
 );
 
 COMMENT ON TABLE FORMAS_PAGO IS 'Catálogo de medios de pago (Efectivo, Tarjeta, Cheque, Transferencia)';
+
+GRANT SELECT ON FORMAS_PAGO TO stg_clinica_user, dwh_clinica_user;

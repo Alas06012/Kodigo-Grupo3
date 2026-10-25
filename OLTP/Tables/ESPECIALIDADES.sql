@@ -12,3 +12,5 @@ CREATE TABLE ESPECIALIDADES (
 );
 
 COMMENT ON TABLE ESPECIALIDADES IS 'Catálogo maestro de especialidades médicas';
+
+GRANT SELECT ON ESPECIALIDADES TO stg_clinica_user, dwh_clinica_user;

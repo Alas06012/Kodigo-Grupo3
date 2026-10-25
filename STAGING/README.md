@@ -73,14 +73,19 @@ Estructura modularizada de la zona intermedia de ingesta, cálculo de hashes SHA
 
 ---
 
+> [!IMPORTANT]
+> **Orden de Dependencias de Auditoría:**
+> Las tablas de Staging (Paso 1) se crean inicialmente. Sin embargo, los **Stored Procedures de Staging (Paso 2)** utilizan los procedimientos autónomos de auditoría `dwh_clinica_user.SP_AUDIT_*`. Por tanto, deben compilarse **después** de haber creado y otorgado permisos a dichos procedimientos en el DWH (consultar `DWH/CTL_ETL_AUDIT.sql` o `PASOS_CREACION/03_CREAR_TABLAS_Y_PROCEDIMIENTOS_DWH.sql`) para evitar el error `PLS-00201`.
+
 ## 3. Instrucciones de Despliegue
 
 Conectado como **`stg_clinica_user`**:
 
 ```sql
--- 1. Crear las 18 tablas
+-- 1. Crear las 18 tablas (o individualmente desde STAGING/Tables/)
 @STAGING/01_CREAR_TODAS_LAS_TABLAS_STAGING.sql
 
--- 2. Compilar los 19 procedimientos almacenados
+-- 2. Compilar los 19 procedimientos almacenados (o individualmente desde STAGING/StoredProcedures/)
+--    (Ejecutar DESPUÉS de compilar la capa DWH de auditoría)
 @STAGING/02_CREAR_TODOS_LOS_STORED_PROCEDURES_STAGING.sql
 ```

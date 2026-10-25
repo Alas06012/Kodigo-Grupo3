@@ -50,11 +50,20 @@ flowchart LR
 
 ```plaintext
 /ProyectoFinal/
-├── CREATE_TABLESPACES.sql               <- Paso 0: Crea tablespaces, esquemas y permisos cruzados
 ├── MANUAL_DATAWAREHOUSE_PIPELINE.md     <- Manual integral: arquitectura, flujo end-to-end, errores y auditoría
 ├── audit_pipeline.py                    <- Auditoría técnica y conciliación financiera centavo a centavo
 ├── reglas_dwh_oracle.md                 <- Estándares de arquitectura Kimball, SCD1/SCD2 y Hash SHA-256
 ├── README.md                            <- Guía maestra de despliegue y documentación general
+│
+├── PASOS_CREACION/                      <- Despliegue Secuencial Paso a Paso (00 al 06 en scripts .sql)
+│   ├── 00_INFRAESTRUCTURA_Y_USUARIOS.sql            <- SYS: Crea tablespaces y usuarios
+│   ├── 01_CREAR_TABLAS_OLTP.sql                     <- red_clinica_user: 18 tablas OLTP (+ Ingesta Parquet)
+│   ├── 02_CREAR_TABLAS_STAGING.sql                  <- stg_clinica_user: 18 tablas Staging
+│   ├── 03_CREAR_TABLAS_Y_PROCEDIMIENTOS_DWH.sql     <- dwh_clinica_user: Tablas DWH + SPs Auditoría y Carga
+│   ├── 04_CREAR_PROCEDIMIENTOS_STAGING.sql          <- stg_clinica_user: 19 SPs de extracción
+│   ├── 05_EJECUTAR_ETL_DWH.sql                      <- dwh_clinica_user: Ejecución SP_LOAD_DWH_MASTER('FULL')
+│   ├── 06_VALIDAR_KPIS_Y_AUDITORIA.sql              <- dwh_clinica_user: Validación de conteos y 12 KPIs
+│   └── README.md                                    <- Guía rápida con tabla de conexiones y credenciales
 │
 ├── OLTP/                                <- Capa Transaccional (red_clinica_user)
 │   ├── 01_CREAR_TODAS_LAS_TABLAS_OLTP.sql   <- DDL maestro consolidado (18 tablas + índices + triggers)
@@ -100,6 +109,10 @@ flowchart LR
 
 ## 4. Guía de Despliegue Rápido Paso a Paso
 
+> [!TIP]
+> **¿Ruta directa y guiada script por script?**
+> Hemos creado la carpeta [`PASOS_CREACION/`](./PASOS_CREACION/), que reúne en 7 scripts `.sql` numerados del `00` al `06` toda la secuencia de creación, compilación y ejecución. Cada archivo incluye en sus primeras líneas el usuario de conexión, contraseña y si requiere alguna acción externa por consola. Puedes consultar el resumen en [`PASOS_CREACION/README.md`](./PASOS_CREACION/README.md).
+
 Sigue esta secuencia para levantar el proyecto desde cero en cualquier máquina con Oracle Database y Python:
 
 ### Prerrequisitos
@@ -114,7 +127,7 @@ Sigue esta secuencia para levantar el proyecto desde cero en cualquier máquina 
 
 Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
 
-- Ejecuta el script: [`CREATE_TABLESPACES.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/CREATE_TABLESPACES.sql)
+- Ejecuta el script: [`PASOS_CREACION/00_INFRAESTRUCTURA_Y_USUARIOS.sql`](./PASOS_CREACION/00_INFRAESTRUCTURA_Y_USUARIOS.sql)
 
 > **Credenciales creadas:**
 >
@@ -143,30 +156,43 @@ Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
 
 ---
 
-### Paso 2: Capa STAGING (Tablas y Procedimientos)
+### Paso 2: Tablas de la Capa STAGING
 
-Conéctate como `stg_clinica_user`:
+Conéctate como stg_clinica_user:
 
 1. **Crear las 18 tablas de Staging:**
-   - Ejecuta: [`STAGING/01_CREAR_TODAS_LAS_TABLAS_STAGING.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/STAGING/01_CREAR_TODAS_LAS_TABLAS_STAGING.sql)
-2. **Compilar los 19 stored procedures de extracción:**
-   - Ejecuta: [`STAGING/02_CREAR_TODOS_LOS_STORED_PROCEDURES_STAGING.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/STAGING/02_CREAR_TODOS_LOS_STORED_PROCEDURES_STAGING.sql)
+   - Ejecuta: [STAGING/01_CREAR_TODAS_LAS_TABLAS_STAGING.sql](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/STAGING/01_CREAR_TODAS_LAS_TABLAS_STAGING.sql)
 
 ---
 
-### Paso 3: Capa DATA WAREHOUSE (Tablas, Procedimientos y Auditoría)
+### Paso 3: Capa DATA WAREHOUSE (Tablas y Procedimientos)
 
-Conéctate como `dwh_clinica_user`:
+Conéctate como dwh_clinica_user:
 
-1. **Crear las 14 tablas (13 dimensionales/hechos + tabla de control `CTL_ETL_AUDIT`):**
-   - Ejecuta: [`DWH/01_CREAR_TODAS_LAS_TABLAS_DWH.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/DWH/01_CREAR_TODAS_LAS_TABLAS_DWH.sql)
-     *(O individualmente junto a [`DWH/CTL_ETL_AUDIT.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/DWH/CTL_ETL_AUDIT.sql))*.
-2. **Compilar los 18 stored procedures (3 de auditoría autónoma + 15 analíticos):**
-   - Ejecuta: [`DWH/02_CREAR_TODOS_LOS_STORED_PROCEDURES_DWH.sql`](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/DWH/02_CREAR_TODOS_LOS_STORED_PROCEDURES_DWH.sql)
+1. **Crear las 14 tablas del DWH (10 dimensiones + 3 hechos + tabla de control CTL_ETL_AUDIT):**
+   - Ejecuta: [DWH/01_CREAR_TODAS_LAS_TABLAS_DWH.sql](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/DWH/01_CREAR_TODAS_LAS_TABLAS_DWH.sql)
+2. **Compilar los 18 stored procedures del DWH (Auditoría autónoma + Carga analítica):**
+   - Ejecuta: [DWH/02_CREAR_TODOS_LOS_STORED_PROCEDURES_DWH.sql](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/DWH/02_CREAR_TODOS_LOS_STORED_PROCEDURES_DWH.sql)
+
+> [!IMPORTANT]
+> Este paso crea los procedimientos de auditoría (SP_AUDIT_START, SP_AUDIT_END, SP_AUDIT_ERROR) y otorga automáticamente los privilegios GRANT EXECUTE a stg_clinica_user. Debe ejecutarse **antes** de compilar los procedimientos de Staging para evitar el error de dependencias PLS-00201.
 
 ---
 
-### Paso 4: Ejecutar la Orquestación ETL Completa
+### Paso 4: Procedimientos de Extracción de STAGING
+
+Conéctate como stg_clinica_user:
+
+1. **Compilar los 19 stored procedures de extracción:**
+   - Ejecuta: [STAGING/02_CREAR_TODOS_LOS_STORED_PROCEDURES_STAGING.sql](file:///d:/Diego/Cursos/KODIGO%20SQL%20IA/ProyectoFinal/STAGING/02_CREAR_TODOS_LOS_STORED_PROCEDURES_STAGING.sql)
+
+> [!NOTE]
+> Ahora compila al 100% sin errores porque los procedimientos de auditoría del DWH ya existen con sus respectivos permisos concedidos. Asimismo, la columna ID_CLINICA_BASE en MEDICOS se extrae sin conflictos hacia STG_MEDICOS.ID_CLINICA.
+
+---
+
+
+### Paso 5: Ejecutar la Orquestación ETL Completa
 
 Conéctate como `dwh_clinica_user` en tu cliente SQL y ejecuta el procedimiento orquestador end-to-end:
 
@@ -182,7 +208,7 @@ EXEC SP_LOAD_DWH_MASTER('INCREMENTAL', 3);
 
 ---
 
-### Paso 5: Auditoría Técnica, Monitoreo y Validación de KPIs
+### Paso 6: Auditoría Técnica, Monitoreo y Validación de KPIs
 
 1. **Monitoreo de Auditoría de Procesos (Tabla de Control `CTL_ETL_AUDIT`):**
    Conéctate como `dwh_clinica_user` y revisa la ejecución del último lote procesado:
@@ -211,7 +237,7 @@ EXEC SP_LOAD_DWH_MASTER('INCREMENTAL', 3);
 
 ---
 
-### Paso 6: Orquestación Visual con Apache Hop (Opcional)
+### Paso 7: Orquestación Visual con Apache Hop (Opcional)
 
 Si utilizas **Apache Hop** como orquestador empresarial para calendarizar o monitorear visualmente los procesos:
 

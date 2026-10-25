@@ -408,6 +408,31 @@ BEGIN
 END;
 /
 
+
+-- ============================================================================
+-- 7. OTORGAR PRIVILEGIOS DE LECTURA DIRECTA A STAGING Y DWH
+-- ============================================================================
+PROMPT >>> Otorgando permisos SELECT explicitos a stg_clinica_user y dwh_clinica_user...
+
+GRANT SELECT ON UBICACIONES TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON CLINICAS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON EMPRESAS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON ASEGURADORAS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON PACIENTES TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON ESPECIALIDADES TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON MEDICOS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON MEDICOS_ESPECIALIDADES TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON ENFERMEDADES TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON TIPOS_CONSULTA TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON PROCEDIMIENTOS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON CONSULTAS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON DIAGNOSTICOS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON CONSULTAS_PROCEDIMIENTOS TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON FORMAS_PAGO TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON COBROS_CONSULTA TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON DISTRIBUCION_COBRO TO stg_clinica_user, dwh_clinica_user;
+GRANT SELECT ON TRANSACCIONES_PAGO TO stg_clinica_user, dwh_clinica_user;
+
 PROMPT ============================================================================
 PROMPT ESQUEMA OLTP CREADO EXITOSAMENTE (18 TABLAS, ÍNDICES Y TRIGGERS).
 PROMPT ============================================================================

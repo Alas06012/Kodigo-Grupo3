@@ -11,3 +11,5 @@ CREATE TABLE ENFERMEDADES (
 );
 
 COMMENT ON TABLE ENFERMEDADES IS 'Catálogo nosológico internacional de enfermedades (CIE-10)';
+
+GRANT SELECT ON ENFERMEDADES TO stg_clinica_user, dwh_clinica_user;

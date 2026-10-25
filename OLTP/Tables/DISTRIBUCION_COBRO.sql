@@ -33,3 +33,5 @@ CREATE TABLE DISTRIBUCION_COBRO (
 
 COMMENT ON TABLE  DISTRIBUCION_COBRO IS 'Reparto de responsabilidad económica por pagador';
 COMMENT ON COLUMN DISTRIBUCION_COBRO.SALDO_PENDIENTE IS 'Deuda pendiente de cobro específica de ese pagador (virtual)';
+
+GRANT SELECT ON DISTRIBUCION_COBRO TO stg_clinica_user, dwh_clinica_user;

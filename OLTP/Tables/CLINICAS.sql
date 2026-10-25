@@ -17,3 +17,5 @@ CREATE TABLE CLINICAS (
 );
 
 COMMENT ON TABLE CLINICAS IS 'Sedes físicas asistenciales que integran la red médica';
+
+GRANT SELECT ON CLINICAS TO stg_clinica_user, dwh_clinica_user;

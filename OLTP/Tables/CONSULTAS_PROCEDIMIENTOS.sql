@@ -20,3 +20,5 @@ CREATE TABLE CONSULTAS_PROCEDIMIENTOS (
 );
 
 COMMENT ON TABLE CONSULTAS_PROCEDIMIENTOS IS 'Procedimientos aplicados al paciente durante la consulta (subtotal virtual)';
+
+GRANT SELECT ON CONSULTAS_PROCEDIMIENTOS TO stg_clinica_user, dwh_clinica_user;

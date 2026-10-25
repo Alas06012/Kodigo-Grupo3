@@ -18,3 +18,5 @@ CREATE TABLE MEDICOS (
 );
 
 COMMENT ON TABLE MEDICOS IS 'Médicos adscritos a la red de clínicas';
+
+GRANT SELECT ON MEDICOS TO stg_clinica_user, dwh_clinica_user;

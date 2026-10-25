@@ -16,3 +16,5 @@ CREATE TABLE TIPOS_CONSULTA (
 );
 
 COMMENT ON TABLE TIPOS_CONSULTA IS 'Catálogo de modalidades de consulta con su tarifa base sugerida';
+
+GRANT SELECT ON TIPOS_CONSULTA TO stg_clinica_user, dwh_clinica_user;

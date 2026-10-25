@@ -17,3 +17,5 @@ CREATE TABLE PROCEDIMIENTOS (
 );
 
 COMMENT ON TABLE PROCEDIMIENTOS IS 'Catálogo de intervenciones, terapias y procedimientos clínicos';
+
+GRANT SELECT ON PROCEDIMIENTOS TO stg_clinica_user, dwh_clinica_user;

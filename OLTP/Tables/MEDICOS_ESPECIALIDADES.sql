@@ -17,3 +17,5 @@ CREATE TABLE MEDICOS_ESPECIALIDADES (
 );
 
 COMMENT ON TABLE MEDICOS_ESPECIALIDADES IS 'Especialidades acreditadas por cada profesional médico';
+
+GRANT SELECT ON MEDICOS_ESPECIALIDADES TO stg_clinica_user, dwh_clinica_user;

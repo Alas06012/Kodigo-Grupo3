@@ -7,3 +7,7 @@ __pycache__/
 # Apache Hop execution logs
 HOP/logs/
 *.log
+
+# Large CSV Data Exports (Power BI Data > 100MB exceeds GitHub limits)
+POWER_BI_DATA/*.csv
+*.csv

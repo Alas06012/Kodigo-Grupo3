@@ -256,11 +256,11 @@ La arquitectura recomendada en producción combina la potencia de procesamiento 
 ```mermaid
 flowchart TD
     subgraph HOP["Apache Hop Workflow (.hwf) - Control y Observabilidad"]
-        H1["1. Variables & Fecha Corte"] --> H2["2. Catálogos en Paralelo (3 Hilos)"]
-        H2 --> H3["3. Extracción Transaccional"]
-        H3 --> H4["4. Carga Dimensiones DWH"]
-        H4 --> H5["5. Carga Tablas de Hechos"]
-        H5 --> H6["6. Validación de Auditoría"]
+        H1["1 - Variables & Fecha Corte"] --> H2["2 - Catálogos en Paralelo (3 Hilos)"]
+        H2 --> H3["3 - Extracción Transaccional"]
+        H3 --> H4["4 - Carga Dimensiones DWH"]
+        H4 --> H5["5 - Carga Tablas de Hechos"]
+        H5 --> H6["6 - Validación de Auditoría"]
 
         H3 -.->|"Si Falla Nodo"| FailAlert["Alerta Instantánea<br/>(Email / Teams / Slack)"]
         H5 -.->|"Si Falla Nodo"| FailAlert

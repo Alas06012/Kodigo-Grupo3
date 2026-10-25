@@ -14,3 +14,5 @@ CREATE TABLE ASEGURADORAS (
 );
 
 COMMENT ON TABLE ASEGURADORAS IS 'Compañías aseguradoras que cubren pólizas de pacientes';
+
+GRANT SELECT ON ASEGURADORAS TO stg_clinica_user, dwh_clinica_user;

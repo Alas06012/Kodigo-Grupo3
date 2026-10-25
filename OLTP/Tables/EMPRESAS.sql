@@ -15,3 +15,5 @@ CREATE TABLE EMPRESAS (
 );
 
 COMMENT ON TABLE EMPRESAS IS 'Empresas afiliadas con convenios de salud laboral';
+
+GRANT SELECT ON EMPRESAS TO stg_clinica_user, dwh_clinica_user;

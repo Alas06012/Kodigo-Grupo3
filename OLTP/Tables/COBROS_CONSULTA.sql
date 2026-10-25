@@ -20,3 +20,5 @@ CREATE TABLE COBROS_CONSULTA (
 
 COMMENT ON TABLE  COBROS_CONSULTA IS 'Cuenta médica global consolidada (Honorarios + Procedimientos)';
 COMMENT ON COLUMN COBROS_CONSULTA.SALDO_PENDIENTE IS 'Diferencia en tiempo real (FACTURADO - PAGADO) virtual';
+
+GRANT SELECT ON COBROS_CONSULTA TO stg_clinica_user, dwh_clinica_user;

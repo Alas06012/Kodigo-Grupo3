@@ -16,3 +16,5 @@ CREATE TABLE UBICACIONES (
 
 COMMENT ON TABLE  UBICACIONES IS 'Catálogo territorial para normalización de direcciones físicas';
 COMMENT ON COLUMN UBICACIONES.DISTRITO IS 'Distrito municipal según reorganización territorial';
+
+GRANT SELECT ON UBICACIONES TO stg_clinica_user, dwh_clinica_user;

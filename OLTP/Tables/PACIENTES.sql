@@ -26,3 +26,5 @@ CREATE TABLE PACIENTES (
 
 COMMENT ON TABLE PACIENTES IS 'Registro maestro de expedientes de pacientes';
 COMMENT ON COLUMN PACIENTES.DIRECCION IS 'Dirección exacta declarada por el paciente (calle, polígono, casa)';
+
+GRANT SELECT ON PACIENTES TO stg_clinica_user, dwh_clinica_user;

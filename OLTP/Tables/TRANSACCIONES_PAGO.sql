@@ -18,3 +18,5 @@ CREATE TABLE TRANSACCIONES_PAGO (
 );
 
 COMMENT ON TABLE TRANSACCIONES_PAGO IS 'Historial inmutable de abonos recibidos en caja o banco';
+
+GRANT SELECT ON TRANSACCIONES_PAGO TO stg_clinica_user, dwh_clinica_user;
