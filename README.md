@@ -52,17 +52,19 @@ flowchart LR
 /ProyectoFinal/
 ├── MANUAL_DATAWAREHOUSE_PIPELINE.md     <- Manual integral: arquitectura, flujo end-to-end, errores y auditoría
 ├── audit_pipeline.py                    <- Auditoría técnica y conciliación financiera centavo a centavo
-├── reglas_dwh_oracle.md                 <- Estándares de arquitectura Kimball, SCD1/SCD2 y Hash SHA-256
+├── reglas_dwh_oracle.md                 <- Estándares de arquitectura , SCD1/SCD2 y Hash SHA-256
 ├── README.md                            <- Guía maestra de despliegue y documentación general
 │
-├── PASOS_CREACION/                      <- Despliegue Secuencial Paso a Paso (00 al 06 en scripts .sql)
-│   ├── 00_INFRAESTRUCTURA_Y_USUARIOS.sql            <- SYS: Crea tablespaces y usuarios
-│   ├── 01_CREAR_TABLAS_OLTP.sql                     <- red_clinica_user: 18 tablas OLTP (+ Ingesta Parquet)
-│   ├── 02_CREAR_TABLAS_STAGING.sql                  <- stg_clinica_user: 18 tablas Staging
-│   ├── 03_CREAR_TABLAS_Y_PROCEDIMIENTOS_DWH.sql     <- dwh_clinica_user: Tablas DWH + SPs Auditoría y Carga
-│   ├── 04_CREAR_PROCEDIMIENTOS_STAGING.sql          <- stg_clinica_user: 19 SPs de extracción
-│   ├── 05_EJECUTAR_ETL_DWH.sql                      <- dwh_clinica_user: Ejecución SP_LOAD_DWH_MASTER('FULL')
-│   ├── 06_VALIDAR_KPIS_Y_AUDITORIA.sql              <- dwh_clinica_user: Validación de conteos y 12 KPIs
+├── PASOS_CREACION/                      <- Despliegue Secuencial o Automático en scripts .sql
+│   ├── EJECUTAR_TODO_MASTER.sql                     <- Modo Automático: Ejecuta todo (00 al 07) de una sola vez
+│   ├── 00_LIMPIEZA_TOTAL.sql                        <- SYS: Limpieza previa, cierre de sesiones y reset
+│   ├── 01_INFRAESTRUCTURA_Y_USUARIOS.sql            <- SYS: Crea tablespaces y usuarios
+│   ├── 02_CREAR_TABLAS_OLTP.sql                     <- red_clinica_user: 18 tablas OLTP (+ Ingesta Parquet)
+│   ├── 03_CREAR_TABLAS_STAGING.sql                  <- stg_clinica_user: 18 tablas Staging
+│   ├── 04_CREAR_TABLAS_Y_PROCEDIMIENTOS_DWH.sql     <- dwh_clinica_user: Tablas DWH + SPs Auditoría y Carga
+│   ├── 05_CREAR_PROCEDIMIENTOS_STAGING.sql          <- stg_clinica_user: 19 SPs de extracción
+│   ├── 06_EJECUTAR_ETL_DWH.sql                      <- dwh_clinica_user: Ejecución SP_LOAD_DWH_MASTER('FULL')
+│   ├── 07_VALIDAR_KPIS_Y_AUDITORIA.sql              <- dwh_clinica_user: Validación de conteos y 12 KPIs
 │   └── README.md                                    <- Guía rápida con tabla de conexiones y credenciales
 │
 ├── OLTP/                                <- Capa Transaccional (red_clinica_user)
@@ -110,8 +112,11 @@ flowchart LR
 ## 4. Guía de Despliegue Rápido Paso a Paso
 
 > [!TIP]
-> **¿Ruta directa y guiada script por script?**
-> Hemos creado la carpeta [`PASOS_CREACION/`](./PASOS_CREACION/), que reúne en 7 scripts `.sql` numerados del `00` al `06` toda la secuencia de creación, compilación y ejecución. Cada archivo incluye en sus primeras líneas el usuario de conexión, contraseña y si requiere alguna acción externa por consola. Puedes consultar el resumen en [`PASOS_CREACION/README.md`](./PASOS_CREACION/README.md).
+> **¿Ruta directa y guiada?**
+> Hemos creado la carpeta [`PASOS_CREACION/`](./PASOS_CREACION/), que ofrece dos modalidades de despliegue:
+> 1. **Modo Automático (100% SQL):** Ejecuta [`PASOS_CREACION/EJECUTAR_TODO_MASTER.sql`](./PASOS_CREACION/EJECUTAR_TODO_MASTER.sql) conectado como `SYS AS SYSDBA` para limpiar, levantar y procesar todo de una sola vez (en SQL Developer con F5 o SQL*Plus).
+> 2. **Modo Paso a Paso:** Ejecuta los 8 scripts `.sql` numerados del `00` al `07` conectándote con el usuario correspondiente.
+> Consulta todos los detalles en [`PASOS_CREACION/README.md`](./PASOS_CREACION/README.md).
 
 Sigue esta secuencia para levantar el proyecto desde cero en cualquier máquina con Oracle Database y Python:
 
@@ -123,11 +128,20 @@ Sigue esta secuencia para levantar el proyecto desde cero en cualquier máquina 
 
 ---
 
-### Paso 0: Crear Tablespaces, Usuarios y Privilegios
+### Paso 00: Limpieza Total y Reset del Entorno (Opcional / Recomendado al Reinstalar)
 
 Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
 
-- Ejecuta el script: [`PASOS_CREACION/00_INFRAESTRUCTURA_Y_USUARIOS.sql`](./PASOS_CREACION/00_INFRAESTRUCTURA_Y_USUARIOS.sql)
+- Ejecuta el script: [`PASOS_CREACION/00_LIMPIEZA_TOTAL.sql`](./PASOS_CREACION/00_LIMPIEZA_TOTAL.sql)
+  *Cierra sesiones activas, elimina los 3 esquemas en cascada y borra los datafiles de los tablespaces de forma segura e idempotente.*
+
+---
+
+### Paso 01: Crear Tablespaces, Usuarios y Privilegios
+
+Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
+
+- Ejecuta el script: [`PASOS_CREACION/01_INFRAESTRUCTURA_Y_USUARIOS.sql`](./PASOS_CREACION/01_INFRAESTRUCTURA_Y_USUARIOS.sql)
 
 > **Credenciales creadas:**
 >
@@ -137,7 +151,7 @@ Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
 
 ---
 
-### Paso 1: Capa OLTP (Estructura e Ingesta de Datos)
+### Paso 02: Capa OLTP (Estructura e Ingesta de Datos)
 
 1. **Crear las 18 tablas relacionales:**Conéctate como `red_clinica_user` y ejecuta:
 
@@ -156,7 +170,7 @@ Conectado como **`SYS AS SYSDBA`** o **`SYSTEM`** en el contenedor `XEPDB1`:
 
 ---
 
-### Paso 2: Tablas de la Capa STAGING
+### Paso 03: Tablas de la Capa STAGING
 
 Conéctate como stg_clinica_user:
 
@@ -165,7 +179,7 @@ Conéctate como stg_clinica_user:
 
 ---
 
-### Paso 3: Capa DATA WAREHOUSE (Tablas y Procedimientos)
+### Paso 04: Capa DATA WAREHOUSE (Tablas y Procedimientos)
 
 Conéctate como dwh_clinica_user:
 
@@ -179,7 +193,7 @@ Conéctate como dwh_clinica_user:
 
 ---
 
-### Paso 4: Procedimientos de Extracción de STAGING
+### Paso 05: Procedimientos de Extracción de STAGING
 
 Conéctate como stg_clinica_user:
 
@@ -192,7 +206,7 @@ Conéctate como stg_clinica_user:
 ---
 
 
-### Paso 5: Ejecutar la Orquestación ETL Completa
+### Paso 06: Ejecutar la Orquestación ETL Completa
 
 Conéctate como `dwh_clinica_user` en tu cliente SQL y ejecuta el procedimiento orquestador end-to-end:
 
@@ -208,7 +222,7 @@ EXEC SP_LOAD_DWH_MASTER('INCREMENTAL', 3);
 
 ---
 
-### Paso 6: Auditoría Técnica, Monitoreo y Validación de KPIs
+### Paso 07: Auditoría Técnica, Monitoreo y Validación de KPIs
 
 1. **Monitoreo de Auditoría de Procesos (Tabla de Control `CTL_ETL_AUDIT`):**
    Conéctate como `dwh_clinica_user` y revisa la ejecución del último lote procesado:

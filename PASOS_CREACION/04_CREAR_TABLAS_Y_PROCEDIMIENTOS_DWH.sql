@@ -1,0 +1,2036 @@
+/* ============================================================================
+   PASO 04: TABLAS Y PROCEDIMIENTOS DEL DATA WAREHOUSE (DWH)
+   ============================================================================
+   USUARIO DE CONEXION: dwh_clinica_user
+   CONTRASEÑA:          DwhPass2026
+   CONTENEDOR (PDB):    XEPDB1
+   HOST / PUERTO:       localhost:1521
+   ============================================================================
+   INSTRUCCIONES DE EJECUCION:
+     1. Conectate como 'dwh_clinica_user' (DwhPass2026) en XEPDB1.
+     2. Ejecuta este script completo. Realiza dos acciones clave en orden:
+        PARTE A: Crea el modelo en estrella (10 Dimensiones + 3 Hechos + CTL_ETL_AUDIT).
+        PARTE B: Compila los 18 Stored Procedures analiticos y de auditoria.
+
+   RESOLUCION CLAVE DE DEPENDENCIAS (PLS-00201):
+     Al compilar este paso, se generan 'SP_AUDIT_START', 'SP_AUDIT_END' y
+     'SP_AUDIT_ERROR' con transacciones autonomas, y se otorga automaticamente
+     el privilegio GRANT EXECUTE a 'stg_clinica_user'.
+     Esto permite que el siguiente paso (Paso 04) compile sin ningun error.
+   ============================================================================ */
+
+SET FEEDBACK ON;
+SET SERVEROUTPUT ON SIZE UNLIMITED;
+
+PROMPT ============================================================================
+PROMPT PASO 03 - PARTE A: CREACION DEL MODELO EN ESTRELLA Y TABLA DE AUDITORIA
+PROMPT ============================================================================
+/* ============================================================================
+   PROYECTO DATA WAREHOUSE - RED DE CLÍNICAS
+   CAPA DWH: CREACIÓN INTEGRAL DEL MODELO DIMENSIONAL EN ESTRELLA ()
+   MOTOR: Oracle Database 19c / 21c / 23ai (XEPDB1)
+   ESQUEMA: dwh_clinica_user | TABLESPACE: dwh_clinicas_db
+   ============================================================================
+   INSTRUCCIONES DE EJECUCIÓN:
+     - Conectarse en SQL Developer, DBeaver, VS Code o SQL*Plus como: dwh_clinica_user
+     - Este script es idempotente: elimina primero las tablas de hechos y luego
+       las dimensiones, garantizando la compilación de las 19 FKs sin errores.
+   ============================================================================ */
+
+SET FEEDBACK ON;
+SET ECHO OFF;
+
+-- ============================================================================
+-- 0. LIMPIEZA PREVIA ORDENADA (HECHOS -> DIMENSIONES)
+-- ============================================================================
+BEGIN
+    FOR t IN (
+        SELECT table_name 
+        FROM user_tables 
+        WHERE table_name IN (
+            'CTL_ETL_AUDIT', 'FACT_COBROS_DISTRIBUCION', 'FACT_CONSULTA_DIAGNOSTICOS', 'FACT_CONSULTAS',
+            'DIM_PACIENTE', 'DIM_MEDICO', 'DIM_PAGADOR', 'DIM_FORMA_PAGO',
+            'DIM_TIPO_CONSULTA', 'DIM_ENFERMEDAD', 'DIM_ESPECIALIDAD',
+            'DIM_CLINICA', 'DIM_UBICACION', 'DIM_TIEMPO'
+        )
+    ) LOOP
+        EXECUTE IMMEDIATE 'DROP TABLE ' || t.table_name || ' CASCADE CONSTRAINTS PURGE';
+    END LOOP;
+END;
+/
+
+-- ============================================================================
+-- 1. TABLAS DIMENSIONALES (MAESTRAS / PADRES - SIN DEPENDENCIAS FK)
+-- ============================================================================
+
+-- 1.1 DIM_TIEMPO (Dimensión Conformada Especial - Grano Diario)
+CREATE TABLE DIM_TIEMPO (
+    SK_TIEMPO             NUMBER(8) NOT NULL, -- Formato numérico YYYYMMDD
+    FECHA                 DATE NOT NULL,
+    ANIO                  NUMBER(4) NOT NULL,
+    SEMESTRE              NUMBER(1) NOT NULL,
+    TRIMESTRE             NUMBER(1) NOT NULL,
+    NOMBRE_TRIMESTRE      VARCHAR2(20) NOT NULL,
+    MES                   NUMBER(2) NOT NULL,
+    NOMBRE_MES            VARCHAR2(20) NOT NULL,
+    MES_CORTO             VARCHAR2(10) NOT NULL,
+    SEMANA_ANIO           NUMBER(2) NOT NULL,
+    DIA_MES               NUMBER(2) NOT NULL,
+    DIA_SEMANA            NUMBER(1) NOT NULL,
+    NOMBRE_DIA            VARCHAR2(20) NOT NULL,
+    ES_FIN_SEMANA         NUMBER(1) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_TIEMPO    PRIMARY KEY (SK_TIEMPO),
+    CONSTRAINT UQ_DIM_TIE_FECHA UNIQUE (FECHA),
+    CONSTRAINT CK_DIM_TIE_FINS  CHECK (ES_FIN_SEMANA IN (0, 1)),
+    CONSTRAINT CK_DIM_TIE_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_TIE_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_TIE_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_TIE_ANIO_MES ON DIM_TIEMPO (ANIO, MES);
+CREATE INDEX IX_DIM_TIE_TRIMEST  ON DIM_TIEMPO (ANIO, TRIMESTRE);
+COMMENT ON TABLE DIM_TIEMPO IS 'Dimensión de conformación temporal continua';
+
+-- 1.2 DIM_UBICACION (SCD Tipo 1)
+CREATE TABLE DIM_UBICACION (
+    SK_UBICACION          NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_UBICACION       NUMBER NOT NULL,
+    PAIS                  VARCHAR2(60) NOT NULL,
+    DEPARTAMENTO          VARCHAR2(60) NOT NULL,
+    MUNICIPIO             VARCHAR2(60) NOT NULL,
+    DISTRITO              VARCHAR2(60) NOT NULL,
+    CODIGO_POSTAL         VARCHAR2(10),
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_UBICACION PRIMARY KEY (SK_UBICACION),
+    CONSTRAINT UQ_DIM_UBI_BK    UNIQUE (BK_ID_UBICACION),
+    CONSTRAINT CK_DIM_UBI_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_UBI_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_UBI_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_UBI_DEPTO ON DIM_UBICACION (DEPARTAMENTO, MUNICIPIO);
+CREATE INDEX IX_DIM_UBI_HASH  ON DIM_UBICACION (ROWHASHVALUE);
+COMMENT ON TABLE DIM_UBICACION IS 'Dimensión SCD1: Normalización territorial y demográfica';
+
+-- 1.3 DIM_CLINICA (SCD Tipo 2)
+CREATE TABLE DIM_CLINICA (
+    SK_CLINICA            NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_CLINICA         NUMBER NOT NULL,
+    NOMBRE_CLINICA        VARCHAR2(100) NOT NULL,
+    BK_ID_UBICACION       NUMBER NOT NULL,
+    PAIS                  VARCHAR2(60) NOT NULL,
+    DEPARTAMENTO          VARCHAR2(60) NOT NULL,
+    MUNICIPIO             VARCHAR2(60) NOT NULL,
+    DISTRITO              VARCHAR2(60) NOT NULL,
+    CODIGO_POSTAL         VARCHAR2(10),
+    DIRECCION             VARCHAR2(200),
+    TELEFONO              VARCHAR2(20),
+    FECHA_APERTURA        DATE,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_CLINICA   PRIMARY KEY (SK_CLINICA),
+    CONSTRAINT CK_DIM_CLI_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_CLI_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_CLI_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_CLI_BK_VIG ON DIM_CLINICA (BK_ID_CLINICA, CURRENTFLAG);
+CREATE INDEX IX_DIM_CLI_HASH   ON DIM_CLINICA (ROWHASHVALUE);
+COMMENT ON TABLE DIM_CLINICA IS 'Dimensión SCD2: Sedes y centros médicos de atención';
+
+-- 1.4 DIM_ESPECIALIDAD (SCD Tipo 1)
+CREATE TABLE DIM_ESPECIALIDAD (
+    SK_ESPECIALIDAD       NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_ESPECIALIDAD    NUMBER NOT NULL,
+    NOMBRE_ESPECIALIDAD   VARCHAR2(80) NOT NULL,
+    DESCRIPCION           VARCHAR2(300),
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_ESPECIALIDAD PRIMARY KEY (SK_ESPECIALIDAD),
+    CONSTRAINT UQ_DIM_ESP_BK       UNIQUE (BK_ID_ESPECIALIDAD),
+    CONSTRAINT CK_DIM_ESP_FLAG     CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_ESP_CARGA    CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_ESP_TRX      CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_ESP_HASH ON DIM_ESPECIALIDAD (ROWHASHVALUE);
+COMMENT ON TABLE DIM_ESPECIALIDAD IS 'Dimensión SCD1: Especialidades y ramas médicas';
+
+-- 1.5 DIM_ENFERMEDAD (SCD Tipo 1)
+CREATE TABLE DIM_ENFERMEDAD (
+    SK_ENFERMEDAD         NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_ENFERMEDAD      NUMBER NOT NULL,
+    CODIGO_CIE10          VARCHAR2(10),
+    NOMBRE_ENFERMEDAD     VARCHAR2(120) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_ENFERMEDAD PRIMARY KEY (SK_ENFERMEDAD),
+    CONSTRAINT UQ_DIM_ENF_BK     UNIQUE (BK_ID_ENFERMEDAD),
+    CONSTRAINT CK_DIM_ENF_FLAG   CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_ENF_CARGA  CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_ENF_TRX    CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_ENF_CIE10 ON DIM_ENFERMEDAD (CODIGO_CIE10);
+CREATE INDEX IX_DIM_ENF_HASH  ON DIM_ENFERMEDAD (ROWHASHVALUE);
+COMMENT ON TABLE DIM_ENFERMEDAD IS 'Dimensión SCD1: Catálogo nosológico CIE-10';
+
+-- 1.6 DIM_TIPO_CONSULTA (SCD Tipo 1)
+CREATE TABLE DIM_TIPO_CONSULTA (
+    SK_TIPO_CONSULTA      NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_TIPO_CONSULTA   NUMBER NOT NULL,
+    NOMBRE_TIPO           VARCHAR2(60) NOT NULL,
+    DESCRIPCION           VARCHAR2(250),
+    PRECIO_BASE           NUMBER(10,2) NOT NULL,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_TIPO_CONSULTA PRIMARY KEY (SK_TIPO_CONSULTA),
+    CONSTRAINT UQ_DIM_TC_BK         UNIQUE (BK_ID_TIPO_CONSULTA),
+    CONSTRAINT CK_DIM_TC_FLAG       CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_TC_CARGA      CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_TC_TRX        CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_TC_HASH ON DIM_TIPO_CONSULTA (ROWHASHVALUE);
+COMMENT ON TABLE DIM_TIPO_CONSULTA IS 'Dimensión SCD1: Modalidades de atención médica';
+
+-- 1.7 DIM_FORMA_PAGO (SCD Tipo 1)
+CREATE TABLE DIM_FORMA_PAGO (
+    SK_FORMA_PAGO         NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_FORMA_PAGO      NUMBER NOT NULL,
+    NOMBRE_FORMA_PAGO     VARCHAR2(50) NOT NULL,
+    CATEGORIA             VARCHAR2(20) NOT NULL,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_FORMA_PAGO PRIMARY KEY (SK_FORMA_PAGO),
+    CONSTRAINT UQ_DIM_FP_BK      UNIQUE (BK_ID_FORMA_PAGO),
+    CONSTRAINT CK_DIM_FP_FLAG    CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_FP_CARGA   CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_FP_TRX     CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_FP_HASH ON DIM_FORMA_PAGO (ROWHASHVALUE);
+COMMENT ON TABLE DIM_FORMA_PAGO IS 'Dimensión SCD1: Medios e instrumentos de pago';
+
+-- 1.8 DIM_PAGADOR (SCD Tipo 1 - Unificada)
+CREATE TABLE DIM_PAGADOR (
+    SK_PAGADOR            NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    TIPO_PAGADOR          VARCHAR2(20) NOT NULL,
+    BK_ID_ORIGEN          NUMBER NOT NULL,
+    NOMBRE_PAGADOR        VARCHAR2(150) NOT NULL,
+    NUMERO_IDENTIFICACION VARCHAR2(40),
+    CATEGORIA_PAGADOR     VARCHAR2(30) NOT NULL,
+    TELEFONO              VARCHAR2(20),
+    DIRECCION             VARCHAR2(200),
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_PAGADOR   PRIMARY KEY (SK_PAGADOR),
+    CONSTRAINT UQ_DIM_PAG_BK    UNIQUE (TIPO_PAGADOR, BK_ID_ORIGEN),
+    CONSTRAINT CK_DIM_PAG_TIPO  CHECK (TIPO_PAGADOR IN ('PACIENTE', 'EMPRESA', 'ASEGURADORA')),
+    CONSTRAINT CK_DIM_PAG_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_PAG_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_PAG_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_PAG_HASH ON DIM_PAGADOR (ROWHASHVALUE);
+CREATE INDEX IX_DIM_PAG_CAT  ON DIM_PAGADOR (CATEGORIA_PAGADOR);
+COMMENT ON TABLE DIM_PAGADOR IS 'Dimensión SCD1: Normalización de entidades pagadoras';
+
+-- 1.9 DIM_MEDICO (SCD Tipo 2)
+CREATE TABLE DIM_MEDICO (
+    SK_MEDICO             NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_MEDICO          NUMBER NOT NULL,
+    NOMBRES               VARCHAR2(60) NOT NULL,
+    APELLIDOS             VARCHAR2(60) NOT NULL,
+    NOMBRE_COMPLETO       VARCHAR2(125) NOT NULL,
+    NUM_COLEGIADO         VARCHAR2(20) NOT NULL,
+    BK_ID_CLINICA_BASE    NUMBER NOT NULL,
+    NOMBRE_CLINICA_BASE   VARCHAR2(100),
+    FECHA_INGRESO         DATE NOT NULL,
+    ESTADO                VARCHAR2(10) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG           NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA             VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO           DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN              DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION       CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE          VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_MEDICO    PRIMARY KEY (SK_MEDICO),
+    CONSTRAINT CK_DIM_MED_FLAG  CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_MED_CARGA CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_MED_TRX   CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_MED_BK_VIG ON DIM_MEDICO (BK_ID_MEDICO, CURRENTFLAG);
+CREATE INDEX IX_DIM_MED_HASH   ON DIM_MEDICO (ROWHASHVALUE);
+COMMENT ON TABLE DIM_MEDICO IS 'Dimensión SCD2: Cuerpo facultativo y acreditaciones';
+
+-- 1.10 DIM_PACIENTE (SCD Tipo 2)
+CREATE TABLE DIM_PACIENTE (
+    SK_PACIENTE                NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_PACIENTE             NUMBER NOT NULL,
+    NOMBRES                    VARCHAR2(60) NOT NULL,
+    APELLIDOS                  VARCHAR2(60) NOT NULL,
+    NOMBRE_COMPLETO            VARCHAR2(125) NOT NULL,
+    FECHA_NACIMIENTO           DATE NOT NULL,
+    EDAD                       NUMBER(3) NOT NULL,
+    GRUPO_ETARIO               VARCHAR2(30) NOT NULL,
+    SEXO                       CHAR(1) NOT NULL,
+    DIRECCION                  VARCHAR2(200),
+    BK_ID_UBICACION            NUMBER,
+    PAIS                       VARCHAR2(60),
+    DEPARTAMENTO               VARCHAR2(60),
+    MUNICIPIO                  VARCHAR2(60),
+    DISTRITO                   VARCHAR2(60),
+    CODIGO_POSTAL              VARCHAR2(10),
+    BK_ID_CLINICA_HABITUAL     NUMBER,
+    NOMBRE_CLINICA_HABITUAL    VARCHAR2(100),
+    BK_ID_EMPRESA              NUMBER,
+    NOMBRE_EMPRESA             VARCHAR2(120),
+    SECTOR_EMPRESA             VARCHAR2(60),
+    BK_ID_ASEGURADORA          NUMBER,
+    NOMBRE_ASEGURADORA         VARCHAR2(120),
+    TIPO_COBERTURA_ASEGURADORA VARCHAR2(60),
+    NUMERO_POLIZA              VARCHAR2(40),
+    FECHA_REGISTRO             DATE NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG                NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA                  VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO                DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN                   DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION            CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE               VARCHAR2(64) NOT NULL,
+    CONSTRAINT PK_DIM_PACIENTE   PRIMARY KEY (SK_PACIENTE),
+    CONSTRAINT CK_DIM_PAC_SEXO   CHECK (SEXO IN ('M', 'F')),
+    CONSTRAINT CK_DIM_PAC_FLAG   CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_DIM_PAC_CARGA  CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_DIM_PAC_TRX    CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_DIM_PAC_BK_VIG  ON DIM_PACIENTE (BK_ID_PACIENTE, CURRENTFLAG);
+CREATE INDEX IX_DIM_PAC_HASH    ON DIM_PACIENTE (ROWHASHVALUE);
+CREATE INDEX IX_DIM_PAC_GRUPOET ON DIM_PACIENTE (GRUPO_ETARIO);
+CREATE INDEX IX_DIM_PAC_DEPTO   ON DIM_PACIENTE (DEPARTAMENTO);
+COMMENT ON TABLE DIM_PACIENTE IS 'Dimensión SCD2: Expediente maestro del paciente con historial';
+
+-- ============================================================================
+-- 2. TABLAS DE HECHOS (FACT TABLES - CON CLAVES FORÁNEAS)
+-- ============================================================================
+
+-- 2.1 FACT_CONSULTAS
+CREATE TABLE FACT_CONSULTAS (
+    SK_CONSULTA               NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_CONSULTA            NUMBER NOT NULL,
+    -- Claves Foráneas hacia las Dimensiones
+    SK_TIEMPO                 NUMBER(8) NOT NULL,
+    SK_PACIENTE               NUMBER NOT NULL,
+    SK_CLINICA                NUMBER NOT NULL,
+    SK_MEDICO                 NUMBER NOT NULL,
+    SK_ESPECIALIDAD           NUMBER NOT NULL,
+    SK_TIPO_CONSULTA          NUMBER NOT NULL,
+    SK_UBICACION_PACIENTE     NUMBER NOT NULL,
+    -- Métricas cuantitativas
+    CANTIDAD_CONSULTAS        NUMBER(1)    DEFAULT 1 NOT NULL,
+    PRECIO_HONORARIOS         NUMBER(10,2) NOT NULL,
+    CANTIDAD_PROCEDIMIENTOS   NUMBER(5)    DEFAULT 0 NOT NULL,
+    TOTAL_PROCEDIMIENTOS      NUMBER(10,2) DEFAULT 0 NOT NULL,
+    MONTO_TOTAL_FACTURADO     NUMBER(10,2) NOT NULL,
+    MONTO_TOTAL_PAGADO        NUMBER(10,2) DEFAULT 0 NOT NULL,
+    SALDO_PENDIENTE           NUMBER(10,2) NOT NULL,
+    -- Atributos degenerados de auditoría operativa
+    ESTADO_COBRO              VARCHAR2(15) DEFAULT 'PENDIENTE' NOT NULL,
+    TIENE_PROCEDIMIENTOS      CHAR(1)      DEFAULT 'N' NOT NULL,
+    MOTIVO_CONSULTA           VARCHAR2(400),
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG               NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA                 VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO               DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN                  DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION           CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE              VARCHAR2(64) NOT NULL,
+    -- Restricciones de Clave Primaria y Foráneas
+    CONSTRAINT PK_FACT_CONSULTAS     PRIMARY KEY (SK_CONSULTA),
+    CONSTRAINT UQ_FACT_CONS_BK       UNIQUE (BK_ID_CONSULTA),
+    CONSTRAINT FK_FCONS_TIEMPO       FOREIGN KEY (SK_TIEMPO) REFERENCES DIM_TIEMPO (SK_TIEMPO),
+    CONSTRAINT FK_FCONS_PACIENTE     FOREIGN KEY (SK_PACIENTE) REFERENCES DIM_PACIENTE (SK_PACIENTE),
+    CONSTRAINT FK_FCONS_CLINICA      FOREIGN KEY (SK_CLINICA) REFERENCES DIM_CLINICA (SK_CLINICA),
+    CONSTRAINT FK_FCONS_MEDICO       FOREIGN KEY (SK_MEDICO) REFERENCES DIM_MEDICO (SK_MEDICO),
+    CONSTRAINT FK_FCONS_ESPECIALIDAD FOREIGN KEY (SK_ESPECIALIDAD) REFERENCES DIM_ESPECIALIDAD (SK_ESPECIALIDAD),
+    CONSTRAINT FK_FCONS_TIPOCONS     FOREIGN KEY (SK_TIPO_CONSULTA) REFERENCES DIM_TIPO_CONSULTA (SK_TIPO_CONSULTA),
+    CONSTRAINT FK_FCONS_UBICPAC      FOREIGN KEY (SK_UBICACION_PACIENTE) REFERENCES DIM_UBICACION (SK_UBICACION),
+    -- Validaciones de Negocio
+    CONSTRAINT CK_FCONS_CANTIDAD     CHECK (CANTIDAD_CONSULTAS > 0),
+    CONSTRAINT CK_FCONS_MONTOS       CHECK (MONTO_TOTAL_FACTURADO >= 0 AND MONTO_TOTAL_PAGADO >= 0),
+    CONSTRAINT CK_FCONS_PROC         CHECK (TIENE_PROCEDIMIENTOS IN ('S', 'N')),
+    CONSTRAINT CK_FCONS_FLAG         CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_FCONS_CARGA        CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_FCONS_TRX          CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_FCONS_TIEMPO       ON FACT_CONSULTAS (SK_TIEMPO);
+CREATE INDEX IX_FCONS_PACIENTE     ON FACT_CONSULTAS (SK_PACIENTE);
+CREATE INDEX IX_FCONS_CLINICA      ON FACT_CONSULTAS (SK_CLINICA);
+CREATE INDEX IX_FCONS_MEDICO       ON FACT_CONSULTAS (SK_MEDICO);
+CREATE INDEX IX_FCONS_ESPECIALIDAD ON FACT_CONSULTAS (SK_ESPECIALIDAD);
+CREATE INDEX IX_FCONS_TIPOCONS     ON FACT_CONSULTAS (SK_TIPO_CONSULTA);
+CREATE INDEX IX_FCONS_UBICPAC      ON FACT_CONSULTAS (SK_UBICACION_PACIENTE);
+CREATE INDEX IX_FCONS_HASH         ON FACT_CONSULTAS (ROWHASHVALUE);
+COMMENT ON TABLE FACT_CONSULTAS IS 'Tabla de Hechos: Consultas médicas ejecutadas (Grano: 1 fila por consulta)';
+
+-- 2.2 FACT_CONSULTA_DIAGNOSTICOS
+CREATE TABLE FACT_CONSULTA_DIAGNOSTICOS (
+    SK_CONSULTA_DIAGNOSTICO   NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_DIAGNOSTICO         NUMBER NOT NULL,
+    BK_ID_CONSULTA            NUMBER NOT NULL,
+    -- Claves Foráneas hacia las Dimensiones
+    SK_TIEMPO                 NUMBER(8) NOT NULL,
+    SK_PACIENTE               NUMBER NOT NULL,
+    SK_CLINICA                NUMBER NOT NULL,
+    SK_MEDICO                 NUMBER NOT NULL,
+    SK_ESPECIALIDAD           NUMBER NOT NULL,
+    SK_ENFERMEDAD             NUMBER NOT NULL,
+    SK_UBICACION_PACIENTE     NUMBER NOT NULL,
+    -- Métricas cuantitativas y epidemiológicas
+    CONTEO_DIAGNOSTICO        NUMBER(1)    DEFAULT 1 NOT NULL,
+    TOTAL_DIAGNOSTICOS_CONS   NUMBER(3)    NOT NULL,
+    MONTO_TOTAL_CONSULTA      NUMBER(10,2) NOT NULL,
+    MONTO_PRORRATEADO         NUMBER(10,2) NOT NULL,
+    -- Atributo degenerado
+    OBSERVACIONES             VARCHAR2(300),
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG               NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA                 VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO               DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN                  DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION           CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE              VARCHAR2(64) NOT NULL,
+    -- Restricciones
+    CONSTRAINT PK_FACT_CONS_DIAG     PRIMARY KEY (SK_CONSULTA_DIAGNOSTICO),
+    CONSTRAINT UQ_FACT_CDIAG_BK      UNIQUE (BK_ID_DIAGNOSTICO),
+    CONSTRAINT FK_FDIAG_TIEMPO       FOREIGN KEY (SK_TIEMPO) REFERENCES DIM_TIEMPO (SK_TIEMPO),
+    CONSTRAINT FK_FDIAG_PACIENTE     FOREIGN KEY (SK_PACIENTE) REFERENCES DIM_PACIENTE (SK_PACIENTE),
+    CONSTRAINT FK_FDIAG_CLINICA      FOREIGN KEY (SK_CLINICA) REFERENCES DIM_CLINICA (SK_CLINICA),
+    CONSTRAINT FK_FDIAG_MEDICO       FOREIGN KEY (SK_MEDICO) REFERENCES DIM_MEDICO (SK_MEDICO),
+    CONSTRAINT FK_FDIAG_ESPECIALIDAD FOREIGN KEY (SK_ESPECIALIDAD) REFERENCES DIM_ESPECIALIDAD (SK_ESPECIALIDAD),
+    CONSTRAINT FK_FDIAG_ENFERMEDAD   FOREIGN KEY (SK_ENFERMEDAD) REFERENCES DIM_ENFERMEDAD (SK_ENFERMEDAD),
+    CONSTRAINT FK_FDIAG_UBICPAC      FOREIGN KEY (SK_UBICACION_PACIENTE) REFERENCES DIM_UBICACION (SK_UBICACION),
+    -- Validaciones de Negocio
+    CONSTRAINT CK_FDIAG_CONTEO       CHECK (CONTEO_DIAGNOSTICO = 1),
+    CONSTRAINT CK_FDIAG_MONTOS       CHECK (MONTO_TOTAL_CONSULTA >= 0 AND MONTO_PRORRATEADO >= 0),
+    CONSTRAINT CK_FDIAG_FLAG         CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_FDIAG_CARGA        CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_FDIAG_TRX          CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_FDIAG_TIEMPO       ON FACT_CONSULTA_DIAGNOSTICOS (SK_TIEMPO);
+CREATE INDEX IX_FDIAG_PACIENTE     ON FACT_CONSULTA_DIAGNOSTICOS (SK_PACIENTE);
+CREATE INDEX IX_FDIAG_CLINICA      ON FACT_CONSULTA_DIAGNOSTICOS (SK_CLINICA);
+CREATE INDEX IX_FDIAG_MEDICO       ON FACT_CONSULTA_DIAGNOSTICOS (SK_MEDICO);
+CREATE INDEX IX_FDIAG_ESPECIALIDAD ON FACT_CONSULTA_DIAGNOSTICOS (SK_ESPECIALIDAD);
+CREATE INDEX IX_FDIAG_ENFERMEDAD   ON FACT_CONSULTA_DIAGNOSTICOS (SK_ENFERMEDAD);
+CREATE INDEX IX_FDIAG_UBICPAC      ON FACT_CONSULTA_DIAGNOSTICOS (SK_UBICACION_PACIENTE);
+CREATE INDEX IX_FDIAG_HASH         ON FACT_CONSULTA_DIAGNOSTICOS (ROWHASHVALUE);
+COMMENT ON TABLE FACT_CONSULTA_DIAGNOSTICOS IS 'Tabla de Hechos: Morbilidad y prevalencia diagnóstica';
+
+-- 2.3 FACT_COBROS_DISTRIBUCION
+CREATE TABLE FACT_COBROS_DISTRIBUCION (
+    SK_COBRO_DISTRIBUCION     NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BK_ID_DISTRIBUCION        NUMBER NOT NULL,
+    -- Claves Foráneas hacia las Dimensiones
+    SK_TIEMPO                 NUMBER(8) NOT NULL,
+    SK_PACIENTE               NUMBER NOT NULL,
+    SK_CLINICA                NUMBER NOT NULL,
+    SK_PAGADOR                NUMBER NOT NULL,
+    SK_FORMA_PAGO_PREDOMINANTE NUMBER NOT NULL,
+    -- Métricas cuantitativas
+    PORCENTAJE_COBERTURA      NUMBER(5,2)  NOT NULL,
+    MONTO_ASIGNADO            NUMBER(10,2) NOT NULL,
+    MONTO_PAGADO              NUMBER(10,2) NOT NULL,
+    SALDO_PENDIENTE           NUMBER(10,2) NOT NULL,
+    -- Atributos degenerados
+    BK_ID_COBRO               NUMBER NOT NULL,
+    BK_ID_CONSULTA            NUMBER NOT NULL,
+    ESTADO_DISTRIBUCION       VARCHAR2(15) NOT NULL,
+    TIPO_PAGADOR              VARCHAR2(20) NOT NULL,
+    -- 6 Columnas Técnicas de Auditoría
+    CURRENTFLAG               NUMBER(1)    DEFAULT 1 NOT NULL,
+    TIPOCARGA                 VARCHAR2(20) DEFAULT 'FULL' NOT NULL,
+    FECHAINICIO               DATE         DEFAULT SYSDATE NOT NULL,
+    FECHAFIN                  DATE         DEFAULT DATE '2999-12-31' NOT NULL,
+    TIPOTRANSACCION           CHAR(1)      DEFAULT 'I' NOT NULL,
+    ROWHASHVALUE              VARCHAR2(64) NOT NULL,
+    -- Restricciones
+    CONSTRAINT PK_FACT_COB_DIST      PRIMARY KEY (SK_COBRO_DISTRIBUCION),
+    CONSTRAINT UQ_FACT_CDIST_BK      UNIQUE (BK_ID_DISTRIBUCION),
+    CONSTRAINT FK_FDIST_TIEMPO       FOREIGN KEY (SK_TIEMPO) REFERENCES DIM_TIEMPO (SK_TIEMPO),
+    CONSTRAINT FK_FDIST_PACIENTE     FOREIGN KEY (SK_PACIENTE) REFERENCES DIM_PACIENTE (SK_PACIENTE),
+    CONSTRAINT FK_FDIST_CLINICA      FOREIGN KEY (SK_CLINICA) REFERENCES DIM_CLINICA (SK_CLINICA),
+    CONSTRAINT FK_FDIST_PAGADOR      FOREIGN KEY (SK_PAGADOR) REFERENCES DIM_PAGADOR (SK_PAGADOR),
+    CONSTRAINT FK_FDIST_FORMAPAGO    FOREIGN KEY (SK_FORMA_PAGO_PREDOMINANTE) REFERENCES DIM_FORMA_PAGO (SK_FORMA_PAGO),
+    -- Validaciones de Negocio
+    CONSTRAINT CK_FDIST_PORCENTAJE   CHECK (PORCENTAJE_COBERTURA > 0 AND PORCENTAJE_COBERTURA <= 100),
+    CONSTRAINT CK_FDIST_MONTOS       CHECK (MONTO_ASIGNADO >= 0 AND MONTO_PAGADO >= 0),
+    CONSTRAINT CK_FDIST_TIPO         CHECK (TIPO_PAGADOR IN ('PACIENTE', 'EMPRESA', 'ASEGURADORA')),
+    CONSTRAINT CK_FDIST_FLAG         CHECK (CURRENTFLAG IN (0, 1)),
+    CONSTRAINT CK_FDIST_CARGA        CHECK (TIPOCARGA IN ('FULL', 'INCREMENTAL')),
+    CONSTRAINT CK_FDIST_TRX          CHECK (TIPOTRANSACCION IN ('I', 'U', 'D'))
+);
+CREATE INDEX IX_FDIST_TIEMPO    ON FACT_COBROS_DISTRIBUCION (SK_TIEMPO);
+CREATE INDEX IX_FDIST_PACIENTE  ON FACT_COBROS_DISTRIBUCION (SK_PACIENTE);
+CREATE INDEX IX_FDIST_CLINICA   ON FACT_COBROS_DISTRIBUCION (SK_CLINICA);
+CREATE INDEX IX_FDIST_PAGADOR   ON FACT_COBROS_DISTRIBUCION (SK_PAGADOR);
+CREATE INDEX IX_FDIST_FORMAPAGO ON FACT_COBROS_DISTRIBUCION (SK_FORMA_PAGO_PREDOMINANTE);
+CREATE INDEX IX_FDIST_HASH      ON FACT_COBROS_DISTRIBUCION (ROWHASHVALUE);
+COMMENT ON TABLE FACT_COBROS_DISTRIBUCION IS 'Tabla de Hechos: Desglose de responsabilidad económica y recaudación';
+
+PROMPT ============================================================================
+PROMPT ESQUEMA DATA WAREHOUSE CREADO EXITOSAMENTE (10 DIMENSIONES + 3 HECHOS CON 19 FKS).
+-- ============================================================================
+-- 3. TABLA DE CONTROL Y AUDITORÍA DE PROCESOS (CTL_ETL_AUDIT)
+-- ============================================================================
+CREATE TABLE CTL_ETL_AUDIT (
+    ID_AUDIT              NUMBER GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1),
+    BATCH_ID              VARCHAR2(50)  NOT NULL,              -- Identificador único del lote (ej. BATCH_20261022_0200)
+    CAPA                  VARCHAR2(20)  NOT NULL,              -- 'STAGING', 'DWH_DIM', 'DWH_FACT', 'ORCHESTRATOR'
+    OBJETO_DESTINO        VARCHAR2(60)  NOT NULL,              -- Nombre de la tabla o entidad (ej. FACT_CONSULTAS)
+    PROCEDIMIENTO         VARCHAR2(60)  NOT NULL,              -- Nombre del SP (ej. SP_LOAD_FACT_CONSULTAS)
+    TIPO_CARGA            VARCHAR2(20)  DEFAULT 'INCREMENTAL', -- 'FULL' o 'INCREMENTAL'
+    FECHA_INICIO          TIMESTAMP     DEFAULT SYSTIMESTAMP NOT NULL,
+    FECHA_FIN             TIMESTAMP,
+    DURACION_SEGUNDOS     NUMBER(10,2),
+    FILAS_LEIDAS          NUMBER(12)    DEFAULT 0,
+    FILAS_INSERTADAS      NUMBER(12)    DEFAULT 0,
+    FILAS_ACTUALIZADAS    NUMBER(12)    DEFAULT 0,
+    FILAS_RECHAZADAS      NUMBER(12)    DEFAULT 0,
+    ESTADO                VARCHAR2(20)  DEFAULT 'RUNNING',     -- 'RUNNING', 'SUCCESS', 'WARNING', 'FAILED'
+    CODIGO_ERROR          VARCHAR2(30),
+    MENSAJE_ERROR         VARCHAR2(4000),
+    USUARIO_EJECUCION     VARCHAR2(60)  DEFAULT USER,
+    HOST_NAME             VARCHAR2(100) DEFAULT SYS_CONTEXT('USERENV', 'HOST'),
+    CONSTRAINT PK_CTL_ETL_AUDIT PRIMARY KEY (ID_AUDIT),
+    CONSTRAINT CK_CTL_AUD_ESTADO CHECK (ESTADO IN ('RUNNING', 'SUCCESS', 'WARNING', 'FAILED'))
+);
+
+CREATE INDEX IX_CTL_AUD_BATCH  ON CTL_ETL_AUDIT (BATCH_ID);
+CREATE INDEX IX_CTL_AUD_FECHA  ON CTL_ETL_AUDIT (FECHA_INICIO);
+CREATE INDEX IX_CTL_AUD_ESTADO ON CTL_ETL_AUDIT (ESTADO);
+
+GRANT SELECT, INSERT, UPDATE ON CTL_ETL_AUDIT TO stg_clinica_user;
+
+COMMENT ON TABLE CTL_ETL_AUDIT IS 'Tabla de control y auditoría de ejecuciones del pipeline analítico';
+
+PROMPT ============================================================================
+
+
+PROMPT ============================================================================
+PROMPT PASO 03 - PARTE B: COMPILACION DE PROCEDIMIENTOS DEL DWH Y AUDITORIA
+PROMPT ============================================================================
+/* ============================================================================
+   PROYECTO DATA WAREHOUSE - RED DE CLÍNICAS
+   COMPILACIÓN CONSOLIDADA DE TODOS LOS STORED PROCEDURES DEL DATA WAREHOUSE
+   MOTOR: Oracle Database 19c / 21c / 23ai
+   ESQUEMA: dwh_clinica_user | TABLESPACE: dwh_clinicas_db
+   ============================================================================
+   INSTRUCCIONES DE EJECUCIÓN:
+     - Conectarse en SQL Developer, DBeaver, VS Code o SQL*Plus como: dwh_clinica_user
+     - Este script compila los 18 stored procedures del Data Warehouse:
+       * 3 Procedimientos de auditoría autónoma (SP_AUDIT_START, SP_AUDIT_END, SP_AUDIT_ERROR)
+       * 2 Procedimientos de Dimensión Tiempo (Poblar + Wrapper)
+       * 9 Procedimientos de Dimensiones (6 SCD1 + 3 SCD2)
+       * 3 Procedimientos de Tablas de Hechos (Fact Consultas, Diagnósticos, Cobros)
+       * 1 Procedimiento Maestro Orquestador (SP_LOAD_DWH_MASTER)
+   ============================================================================ */
+
+SET FEEDBACK ON;
+SET ECHO OFF;
+
+
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_AUDIT_START
+-- OBJETIVO:      Registrar el inicio de un proceso ETL en CTL_ETL_AUDIT
+--                usando transacciones autónomas para no depender del commit de datos.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_START (
+    p_batch_id       IN  VARCHAR2,
+    p_capa           IN  VARCHAR2,
+    p_objeto_destino IN  VARCHAR2,
+    p_procedimiento  IN  VARCHAR2,
+    p_tipo_carga     IN  VARCHAR2,
+    o_id_audit       OUT NUMBER
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    INSERT INTO CTL_ETL_AUDIT (
+        BATCH_ID,
+        CAPA,
+        OBJETO_DESTINO,
+        PROCEDIMIENTO,
+        TIPO_CARGA,
+        FECHA_INICIO,
+        ESTADO
+    ) VALUES (
+        p_batch_id,
+        UPPER(p_capa),
+        UPPER(p_objeto_destino),
+        UPPER(p_procedimiento),
+        UPPER(p_tipo_carga),
+        SYSTIMESTAMP,
+        'RUNNING'
+    )
+    RETURNING ID_AUDIT INTO o_id_audit;
+
+    COMMIT;
+END SP_AUDIT_START;
+/
+
+GRANT EXECUTE ON SP_AUDIT_START TO stg_clinica_user;
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_AUDIT_END
+-- OBJETIVO:      Registrar la finalización exitosa de un proceso ETL en CTL_ETL_AUDIT
+--                calculando la duración en segundos y filas procesadas.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_END (
+    p_id_audit           IN NUMBER,
+    p_filas_leidas       IN NUMBER DEFAULT 0,
+    p_filas_insertadas   IN NUMBER DEFAULT 0,
+    p_filas_actualizadas IN NUMBER DEFAULT 0,
+    p_filas_rechazadas   IN NUMBER DEFAULT 0,
+    p_estado             IN VARCHAR2 DEFAULT 'SUCCESS'
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+    v_inicio TIMESTAMP;
+BEGIN
+    SELECT FECHA_INICIO INTO v_inicio
+    FROM CTL_ETL_AUDIT
+    WHERE ID_AUDIT = p_id_audit;
+
+    UPDATE CTL_ETL_AUDIT
+    SET FECHA_FIN          = SYSTIMESTAMP,
+        DURACION_SEGUNDOS  = ROUND(
+            EXTRACT(DAY FROM (SYSTIMESTAMP - v_inicio)) * 86400 +
+            EXTRACT(HOUR FROM (SYSTIMESTAMP - v_inicio)) * 3600 +
+            EXTRACT(MINUTE FROM (SYSTIMESTAMP - v_inicio)) * 60 +
+            EXTRACT(SECOND FROM (SYSTIMESTAMP - v_inicio)),
+            2
+        ),
+        FILAS_LEIDAS       = NVL(p_filas_leidas, 0),
+        FILAS_INSERTADAS   = NVL(p_filas_insertadas, 0),
+        FILAS_ACTUALIZADAS = NVL(p_filas_actualizadas, 0),
+        FILAS_RECHAZADAS   = NVL(p_filas_rechazadas, 0),
+        ESTADO             = NVL(p_estado, 'SUCCESS')
+    WHERE ID_AUDIT = p_id_audit;
+
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+END SP_AUDIT_END;
+/
+
+GRANT EXECUTE ON SP_AUDIT_END TO stg_clinica_user;
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_AUDIT_ERROR
+-- OBJETIVO:      Registrar el fallo de ejecución en CTL_ETL_AUDIT preservando
+--                el código y mensaje de error incluso ante un ROLLBACK de datos.
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_AUDIT_ERROR (
+    p_id_audit      IN NUMBER,
+    p_codigo_error  IN VARCHAR2,
+    p_mensaje_error IN VARCHAR2
+)
+AUTHID DEFINER
+IS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+    v_inicio TIMESTAMP;
+BEGIN
+    BEGIN
+        SELECT FECHA_INICIO INTO v_inicio
+        FROM CTL_ETL_AUDIT
+        WHERE ID_AUDIT = p_id_audit;
+    EXCEPTION
+        WHEN OTHERS THEN
+            v_inicio := SYSTIMESTAMP;
+    END;
+
+    UPDATE CTL_ETL_AUDIT
+    SET FECHA_FIN         = SYSTIMESTAMP,
+        DURACION_SEGUNDOS = ROUND(
+            EXTRACT(DAY FROM (SYSTIMESTAMP - v_inicio)) * 86400 +
+            EXTRACT(HOUR FROM (SYSTIMESTAMP - v_inicio)) * 3600 +
+            EXTRACT(MINUTE FROM (SYSTIMESTAMP - v_inicio)) * 60 +
+            EXTRACT(SECOND FROM (SYSTIMESTAMP - v_inicio)),
+            2
+        ),
+        ESTADO            = 'FAILED',
+        CODIGO_ERROR      = SUBSTR(p_codigo_error, 1, 30),
+        MENSAJE_ERROR     = SUBSTR(p_mensaje_error, 1, 4000)
+    WHERE ID_AUDIT = p_id_audit;
+
+    COMMIT;
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+END SP_AUDIT_ERROR;
+/
+
+GRANT EXECUTE ON SP_AUDIT_ERROR TO stg_clinica_user;
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_POBLAR_DIM_TIEMPO
+-- OBJETIVO: Generar y cargar el calendario dimensional continuo (2024 al 2030)
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_POBLAR_DIM_TIEMPO (
+    p_anio_inicio IN NUMBER DEFAULT 2024,
+    p_anio_fin    IN NUMBER   DEFAULT 2030,
+    p_batch_id    IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_fecha_inicio DATE;
+    v_fecha_fin    DATE;
+    v_total_dias   NUMBER;
+    v_insertados   NUMBER := 0;
+    v_batch_id     VARCHAR2(50);
+    v_audit_id     NUMBER;
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_TIEMPO', 'SP_POBLAR_DIM_TIEMPO', 'FULL', v_audit_id);
+    v_fecha_inicio := TO_DATE(p_anio_inicio || '-01-01', 'YYYY-MM-DD');
+    v_fecha_fin    := TO_DATE(p_anio_fin || '-12-31', 'YYYY-MM-DD');
+    v_total_dias   := (v_fecha_fin - v_fecha_inicio) + 1;
+
+    DBMS_OUTPUT.PUT_LINE('Iniciando poblamiento de DIM_TIEMPO desde ' || 
+                         TO_CHAR(v_fecha_inicio, 'YYYY-MM-DD') || ' hasta ' || 
+                         TO_CHAR(v_fecha_fin, 'YYYY-MM-DD') || ' (' || v_total_dias || ' días)...');
+
+    -- 1. Insertar Registro Miembro Desconocido / No Asignado 
+    MERGE INTO DIM_TIEMPO d
+    USING (
+        SELECT 
+            19000101 AS SK_TIEMPO,
+            DATE '1900-01-01' AS FECHA,
+            1900 AS ANIO,
+            1 AS SEMESTRE,
+            1 AS TRIMESTRE,
+            'No Aplica' AS NOMBRE_TRIMESTRE,
+            1 AS MES,
+            'No Aplica' AS NOMBRE_MES,
+            'N/A' AS MES_CORTO,
+            1 AS SEMANA_ANIO,
+            1 AS DIA_MES,
+            1 AS DIA_SEMANA,
+            'No Aplica' AS NOMBRE_DIA,
+            0 AS ES_FIN_SEMANA,
+            1 AS CURRENTFLAG,
+            'FULL' AS TIPOCARGA,
+            SYSDATE AS FECHAINICIO,
+            DATE '2999-12-31' AS FECHAFIN,
+            'I' AS TIPOTRANSACCION,
+            RAWTOHEX(STANDARD_HASH('1900-01-01|No Aplica|1900', 'SHA256')) AS ROWHASHVALUE
+        FROM DUAL
+    ) s
+    ON (d.SK_TIEMPO = s.SK_TIEMPO)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            SK_TIEMPO, FECHA, ANIO, SEMESTRE, TRIMESTRE, NOMBRE_TRIMESTRE,
+            MES, NOMBRE_MES, MES_CORTO, SEMANA_ANIO, DIA_MES, DIA_SEMANA,
+            NOMBRE_DIA, ES_FIN_SEMANA,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.SK_TIEMPO, s.FECHA, s.ANIO, s.SEMESTRE, s.TRIMESTRE, s.NOMBRE_TRIMESTRE,
+            s.MES, s.NOMBRE_MES, s.MES_CORTO, s.SEMANA_ANIO, s.DIA_MES, s.DIA_SEMANA,
+            s.NOMBRE_DIA, s.ES_FIN_SEMANA,
+            s.CURRENTFLAG, s.TIPOCARGA, s.FECHAINICIO, s.FECHAFIN, s.TIPOTRANSACCION, s.ROWHASHVALUE
+        );
+
+    -- 2. Inserción Masiva del Rango de Fechas
+    MERGE INTO DIM_TIEMPO d
+    USING (
+        WITH GENERADOR_FECHAS AS (
+            SELECT v_fecha_inicio + LEVEL - 1 AS F
+            FROM DUAL
+            CONNECT BY LEVEL <= (v_fecha_fin - v_fecha_inicio + 1)
+        )
+        SELECT 
+            TO_NUMBER(TO_CHAR(F, 'YYYYMMDD')) AS SK_TIEMPO,
+            F AS FECHA,
+            TO_NUMBER(TO_CHAR(F, 'YYYY')) AS ANIO,
+            CASE WHEN TO_NUMBER(TO_CHAR(F, 'MM')) <= 6 THEN 1 ELSE 2 END AS SEMESTRE,
+            TO_NUMBER(TO_CHAR(F, 'Q')) AS TRIMESTRE,
+            'Trimestre ' || TO_CHAR(F, 'Q') AS NOMBRE_TRIMESTRE,
+            TO_NUMBER(TO_CHAR(F, 'MM')) AS MES,
+            CASE TO_NUMBER(TO_CHAR(F, 'MM'))
+                WHEN 1  THEN 'Enero'
+                WHEN 2  THEN 'Febrero'
+                WHEN 3  THEN 'Marzo'
+                WHEN 4  THEN 'Abril'
+                WHEN 5  THEN 'Mayo'
+                WHEN 6  THEN 'Junio'
+                WHEN 7  THEN 'Julio'
+                WHEN 8  THEN 'Agosto'
+                WHEN 9  THEN 'Septiembre'
+                WHEN 10 THEN 'Octubre'
+                WHEN 11 THEN 'Noviembre'
+                WHEN 12 THEN 'Diciembre'
+            END AS NOMBRE_MES,
+            CASE TO_NUMBER(TO_CHAR(F, 'MM'))
+                WHEN 1  THEN 'Ene'
+                WHEN 2  THEN 'Feb'
+                WHEN 3  THEN 'Mar'
+                WHEN 4  THEN 'Abr'
+                WHEN 5  THEN 'May'
+                WHEN 6  THEN 'Jun'
+                WHEN 7  THEN 'Jul'
+                WHEN 8  THEN 'Ago'
+                WHEN 9  THEN 'Sep'
+                WHEN 10 THEN 'Oct'
+                WHEN 11 THEN 'Nov'
+                WHEN 12 THEN 'Dic'
+            END AS MES_CORTO,
+            TO_NUMBER(TO_CHAR(F, 'IW')) AS SEMANA_ANIO,
+            TO_NUMBER(TO_CHAR(F, 'DD')) AS DIA_MES,
+            TO_NUMBER(TO_CHAR(F, 'D'))  AS DIA_SEMANA,
+            CASE TO_CHAR(F, 'DY', 'NLS_DATE_LANGUAGE=AMERICAN')
+                WHEN 'MON' THEN 'Lunes'
+                WHEN 'TUE' THEN 'Martes'
+                WHEN 'WED' THEN 'Miércoles'
+                WHEN 'THU' THEN 'Jueves'
+                WHEN 'FRI' THEN 'Viernes'
+                WHEN 'SAT' THEN 'Sábado'
+                WHEN 'SUN' THEN 'Domingo'
+            END AS NOMBRE_DIA,
+            CASE WHEN TO_CHAR(F, 'DY', 'NLS_DATE_LANGUAGE=AMERICAN') IN ('SAT', 'SUN') THEN 1 ELSE 0 END AS ES_FIN_SEMANA,
+            1 AS CURRENTFLAG,
+            'FULL' AS TIPOCARGA,
+            SYSDATE AS FECHAINICIO,
+            DATE '2999-12-31' AS FECHAFIN,
+            'I' AS TIPOTRANSACCION,
+            RAWTOHEX(STANDARD_HASH(
+                TO_CHAR(F, 'YYYY-MM-DD') || '|' ||
+                TO_CHAR(F, 'YYYY') || '|' ||
+                TO_CHAR(F, 'MM') || '|' ||
+                TO_CHAR(F, 'Q') || '|' ||
+                TO_CHAR(F, 'IW'),
+                'SHA256'
+            )) AS ROWHASHVALUE
+        FROM GENERADOR_FECHAS
+    ) s
+    ON (d.SK_TIEMPO = s.SK_TIEMPO)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            SK_TIEMPO, FECHA, ANIO, SEMESTRE, TRIMESTRE, NOMBRE_TRIMESTRE,
+            MES, NOMBRE_MES, MES_CORTO, SEMANA_ANIO, DIA_MES, DIA_SEMANA,
+            NOMBRE_DIA, ES_FIN_SEMANA,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.SK_TIEMPO, s.FECHA, s.ANIO, s.SEMESTRE, s.TRIMESTRE, s.NOMBRE_TRIMESTRE,
+            s.MES, s.NOMBRE_MES, s.MES_CORTO, s.SEMANA_ANIO, s.DIA_MES, s.DIA_SEMANA,
+            s.NOMBRE_DIA, s.ES_FIN_SEMANA,
+            s.CURRENTFLAG, s.TIPOCARGA, s.FECHAINICIO, s.FECHAFIN, s.TIPOTRANSACCION, s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.FECHA            = s.FECHA,
+            d.ANIO             = s.ANIO,
+            d.SEMESTRE         = s.SEMESTRE,
+            d.TRIMESTRE        = s.TRIMESTRE,
+            d.NOMBRE_TRIMESTRE = s.NOMBRE_TRIMESTRE,
+            d.MES              = s.MES,
+            d.NOMBRE_MES       = s.NOMBRE_MES,
+            d.MES_CORTO        = s.MES_CORTO,
+            d.SEMANA_ANIO      = s.SEMANA_ANIO,
+            d.DIA_MES          = s.DIA_MES,
+            d.DIA_SEMANA       = s.DIA_SEMANA,
+            d.NOMBRE_DIA       = s.NOMBRE_DIA,
+            d.ES_FIN_SEMANA    = s.ES_FIN_SEMANA,
+            d.FECHAINICIO      = SYSDATE,
+            d.TIPOTRANSACCION  = 'U',
+            d.ROWHASHVALUE     = s.ROWHASHVALUE;
+
+    v_insertados := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_insertados, v_insertados, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('DIM_TIEMPO poblada exitosamente: ' || v_insertados || ' días registrados.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error poblando DIM_TIEMPO: ' || SQLERRM);
+        RAISE;
+END SP_POBLAR_DIM_TIEMPO;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_TIEMPO
+-- OBJETIVO: Wrapper estándar para poblar o actualizar DIM_TIEMPO
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_TIEMPO (
+    p_anio_inicio IN NUMBER   DEFAULT 2024,
+    p_anio_fin    IN NUMBER   DEFAULT 2030,
+    p_batch_id    IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+BEGIN
+    SP_POBLAR_DIM_TIEMPO(p_anio_inicio, p_anio_fin, p_batch_id);
+END SP_LOAD_DIM_TIEMPO;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_UBICACION (SCD Tipo 1)
+-- TABLA DESTINO: DIM_UBICACION
+-- TABLA ORIGEN:  stg_clinica_user.STG_UBICACIONES
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_UBICACION (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_UBICACION', 'SP_LOAD_DIM_UBICACION', v_tipo, v_audit_id);
+    MERGE INTO DIM_UBICACION d
+    USING stg_clinica_user.STG_UBICACIONES s
+    ON (d.BK_ID_UBICACION = s.ID_UBICACION)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_UBICACION, PAIS, DEPARTAMENTO, MUNICIPIO, DISTRITO, CODIGO_POSTAL,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.ID_UBICACION, s.PAIS, s.DEPARTAMENTO, s.MUNICIPIO, s.DISTRITO, s.CODIGO_POSTAL,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.PAIS            = s.PAIS,
+            d.DEPARTAMENTO    = s.DEPARTAMENTO,
+            d.MUNICIPIO       = s.MUNICIPIO,
+            d.DISTRITO        = s.DISTRITO,
+            d.CODIGO_POSTAL   = s.CODIGO_POSTAL,
+            d.FECHAINICIO     = SYSDATE,
+            d.TIPOTRANSACCION = 'U',
+            d.ROWHASHVALUE    = s.ROWHASHVALUE
+        WHERE d.ROWHASHVALUE != s.ROWHASHVALUE;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_UBICACION ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_UBICACION: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_UBICACION;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_ESPECIALIDAD (SCD Tipo 1)
+-- TABLA DESTINO: DIM_ESPECIALIDAD
+-- TABLA ORIGEN:  stg_clinica_user.STG_ESPECIALIDADES
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_ESPECIALIDAD (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_ESPECIALIDAD', 'SP_LOAD_DIM_ESPECIALIDAD', v_tipo, v_audit_id);
+    MERGE INTO DIM_ESPECIALIDAD d
+    USING stg_clinica_user.STG_ESPECIALIDADES s
+    ON (d.BK_ID_ESPECIALIDAD = s.ID_ESPECIALIDAD)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_ESPECIALIDAD, NOMBRE_ESPECIALIDAD, DESCRIPCION,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.ID_ESPECIALIDAD, s.NOMBRE_ESPECIALIDAD, s.DESCRIPCION,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.NOMBRE_ESPECIALIDAD = s.NOMBRE_ESPECIALIDAD,
+            d.DESCRIPCION         = s.DESCRIPCION,
+            d.FECHAINICIO         = SYSDATE,
+            d.TIPOTRANSACCION     = 'U',
+            d.ROWHASHVALUE        = s.ROWHASHVALUE
+        WHERE d.ROWHASHVALUE != s.ROWHASHVALUE;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_ESPECIALIDAD ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_ESPECIALIDAD: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_ESPECIALIDAD;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_ENFERMEDAD (SCD Tipo 1)
+-- TABLA DESTINO: DIM_ENFERMEDAD
+-- TABLA ORIGEN:  stg_clinica_user.STG_ENFERMEDADES
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_ENFERMEDAD (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_ENFERMEDAD', 'SP_LOAD_DIM_ENFERMEDAD', v_tipo, v_audit_id);
+    MERGE INTO DIM_ENFERMEDAD d
+    USING stg_clinica_user.STG_ENFERMEDADES s
+    ON (d.BK_ID_ENFERMEDAD = s.ID_ENFERMEDAD)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_ENFERMEDAD, CODIGO_CIE10, NOMBRE_ENFERMEDAD,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.ID_ENFERMEDAD, s.CODIGO_CIE10, s.NOMBRE_ENFERMEDAD,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.CODIGO_CIE10      = s.CODIGO_CIE10,
+            d.NOMBRE_ENFERMEDAD = s.NOMBRE_ENFERMEDAD,
+            d.FECHAINICIO       = SYSDATE,
+            d.TIPOTRANSACCION   = 'U',
+            d.ROWHASHVALUE      = s.ROWHASHVALUE
+        WHERE d.ROWHASHVALUE != s.ROWHASHVALUE;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_ENFERMEDAD ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_ENFERMEDAD: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_ENFERMEDAD;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_TIPO_CONSULTA (SCD Tipo 1)
+-- TABLA DESTINO: DIM_TIPO_CONSULTA
+-- TABLA ORIGEN:  stg_clinica_user.STG_TIPOS_CONSULTA
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_TIPO_CONSULTA (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_TIPO_CONSULTA', 'SP_LOAD_DIM_TIPO_CONSULTA', v_tipo, v_audit_id);
+    MERGE INTO DIM_TIPO_CONSULTA d
+    USING stg_clinica_user.STG_TIPOS_CONSULTA s
+    ON (d.BK_ID_TIPO_CONSULTA = s.ID_TIPO_CONSULTA)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_TIPO_CONSULTA, NOMBRE_TIPO, DESCRIPCION, PRECIO_BASE, ESTADO,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.ID_TIPO_CONSULTA, s.NOMBRE_TIPO, s.DESCRIPCION, s.PRECIO_BASE, s.ESTADO,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.NOMBRE_TIPO     = s.NOMBRE_TIPO,
+            d.DESCRIPCION     = s.DESCRIPCION,
+            d.PRECIO_BASE     = s.PRECIO_BASE,
+            d.ESTADO          = s.ESTADO,
+            d.FECHAINICIO     = SYSDATE,
+            d.TIPOTRANSACCION = 'U',
+            d.ROWHASHVALUE    = s.ROWHASHVALUE
+        WHERE d.ROWHASHVALUE != s.ROWHASHVALUE;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_TIPO_CONSULTA ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_TIPO_CONSULTA: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_TIPO_CONSULTA;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_FORMA_PAGO (SCD Tipo 1)
+-- TABLA DESTINO: DIM_FORMA_PAGO
+-- TABLA ORIGEN:  stg_clinica_user.STG_FORMAS_PAGO
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_FORMA_PAGO (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_FORMA_PAGO', 'SP_LOAD_DIM_FORMA_PAGO', v_tipo, v_audit_id);
+    MERGE INTO DIM_FORMA_PAGO d
+    USING stg_clinica_user.STG_FORMAS_PAGO s
+    ON (d.BK_ID_FORMA_PAGO = s.ID_FORMA_PAGO)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_FORMA_PAGO, NOMBRE_FORMA_PAGO, CATEGORIA, ESTADO,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.ID_FORMA_PAGO, s.NOMBRE_FORMA_PAGO, s.CATEGORIA, s.ESTADO,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.ROWHASHVALUE
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.NOMBRE_FORMA_PAGO = s.NOMBRE_FORMA_PAGO,
+            d.CATEGORIA         = s.CATEGORIA,
+            d.ESTADO            = s.ESTADO,
+            d.FECHAINICIO       = SYSDATE,
+            d.TIPOTRANSACCION   = 'U',
+            d.ROWHASHVALUE      = s.ROWHASHVALUE
+        WHERE d.ROWHASHVALUE != s.ROWHASHVALUE;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_FORMA_PAGO ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_FORMA_PAGO: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_FORMA_PAGO;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_PAGADOR (SCD Tipo 1)
+-- TABLA DESTINO: DIM_PAGADOR
+-- TABLAS ORIGEN: stg_clinica_user.STG_PACIENTES, STG_EMPRESAS, STG_ASEGURADORAS
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_PAGADOR (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_PAGADOR', 'SP_LOAD_DIM_PAGADOR', v_tipo, v_audit_id);
+    MERGE INTO DIM_PAGADOR d
+    USING (
+        -- Pacientes Particulares
+        SELECT 
+            'PACIENTE' AS TIPO_PAGADOR,
+            p.ID_PACIENTE AS BK_ID_ORIGEN,
+            p.NOMBRES || ' ' || p.APELLIDOS AS NOMBRE_PAGADOR,
+            NULL AS NUMERO_IDENTIFICACION,
+            'PARTICULAR' AS CATEGORIA_PAGADOR,
+            NULL AS TELEFONO,
+            p.DIRECCION,
+            RAWTOHEX(STANDARD_HASH('PACIENTE|' || TO_CHAR(p.ID_PACIENTE) || '|' || p.NOMBRES || '|' || p.APELLIDOS || '|' || NVL(p.DIRECCION, '~'), 'SHA256')) AS HASH_PAG
+        FROM stg_clinica_user.STG_PACIENTES p
+        UNION ALL
+        -- Empresas Afiliadas
+        SELECT 
+            'EMPRESA' AS TIPO_PAGADOR,
+            e.ID_EMPRESA AS BK_ID_ORIGEN,
+            e.NOMBRE_EMPRESA AS NOMBRE_PAGADOR,
+            e.NIT AS NUMERO_IDENTIFICACION,
+            'CORPORATIVO' AS CATEGORIA_PAGADOR,
+            e.TELEFONO,
+            e.DIRECCION,
+            RAWTOHEX(STANDARD_HASH('EMPRESA|' || TO_CHAR(e.ID_EMPRESA) || '|' || e.NOMBRE_EMPRESA || '|' || e.NIT || '|' || NVL(e.TELEFONO, '~'), 'SHA256')) AS HASH_PAG
+        FROM stg_clinica_user.STG_EMPRESAS e
+        UNION ALL
+        -- Compañías Aseguradoras
+        SELECT 
+            'ASEGURADORA' AS TIPO_PAGADOR,
+            a.ID_ASEGURADORA AS BK_ID_ORIGEN,
+            a.NOMBRE_ASEGURADORA AS NOMBRE_PAGADOR,
+            a.NIT AS NUMERO_IDENTIFICACION,
+            'ASEGURADORA' AS CATEGORIA_PAGADOR,
+            a.TELEFONO,
+            NULL AS DIRECCION,
+            RAWTOHEX(STANDARD_HASH('ASEGURADORA|' || TO_CHAR(a.ID_ASEGURADORA) || '|' || a.NOMBRE_ASEGURADORA || '|' || a.NIT || '|' || NVL(a.TELEFONO, '~'), 'SHA256')) AS HASH_PAG
+        FROM stg_clinica_user.STG_ASEGURADORAS a
+    ) s
+    ON (d.TIPO_PAGADOR = s.TIPO_PAGADOR AND d.BK_ID_ORIGEN = s.BK_ID_ORIGEN)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            TIPO_PAGADOR, 
+            BK_ID_ORIGEN, 
+            NOMBRE_PAGADOR, 
+            NUMERO_IDENTIFICACION,
+            CATEGORIA_PAGADOR, 
+            TELEFONO, 
+            DIRECCION,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.TIPO_PAGADOR, 
+            s.BK_ID_ORIGEN, 
+            s.NOMBRE_PAGADOR, 
+            s.NUMERO_IDENTIFICACION,
+            s.CATEGORIA_PAGADOR, 
+            s.TELEFONO, 
+            s.DIRECCION,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.HASH_PAG
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            d.NOMBRE_PAGADOR        = s.NOMBRE_PAGADOR,
+            d.NUMERO_IDENTIFICACION = s.NUMERO_IDENTIFICACION,
+            d.CATEGORIA_PAGADOR     = s.CATEGORIA_PAGADOR,
+            d.TELEFONO              = s.TELEFONO,
+            d.DIRECCION             = s.DIRECCION,
+            d.FECHAINICIO           = SYSDATE,
+            d.TIPOTRANSACCION       = 'U',
+            d.ROWHASHVALUE          = s.HASH_PAG
+        WHERE d.ROWHASHVALUE != s.HASH_PAG;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_PAGADOR ejecutado: ' || v_cant || ' filas afectadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_PAGADOR: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_PAGADOR;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_CLINICA (SCD Tipo 2)
+-- TABLA DESTINO: DIM_CLINICA
+-- TABLAS ORIGEN: stg_clinica_user.STG_CLINICAS, STG_UBICACIONES
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_CLINICA (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_upd  NUMBER := 0;
+    v_ins  NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_CLINICA', 'SP_LOAD_DIM_CLINICA', v_tipo, v_audit_id);
+    -- 1. Caducar registros previos cuyos atributos descriptivos cambiaron (SCD Tipo 2)
+    UPDATE DIM_CLINICA d
+    SET d.CURRENTFLAG     = 0,
+        d.FECHAFIN        = TRUNC(SYSDATE) - (1/86400),
+        d.TIPOTRANSACCION = 'U'
+    WHERE d.CURRENTFLAG = 1
+      AND EXISTS (
+          SELECT 1 
+          FROM stg_clinica_user.STG_CLINICAS s
+          WHERE s.ID_CLINICA = d.BK_ID_CLINICA
+            AND RAWTOHEX(STANDARD_HASH(
+                NVL(s.NOMBRE_CLINICA, '~') || '|' ||
+                NVL(TO_CHAR(s.ID_UBICACION), '~') || '|' ||
+                NVL(s.DIRECCION, '~') || '|' ||
+                NVL(s.TELEFONO, '~') || '|' ||
+                NVL(s.ESTADO, '~'),
+                'SHA256'
+            )) != d.ROWHASHVALUE
+      );
+    v_upd := SQL%ROWCOUNT;
+
+    -- 2. Insertar registros nuevos o nuevas versiones activas
+    INSERT INTO DIM_CLINICA (
+        BK_ID_CLINICA, NOMBRE_CLINICA, BK_ID_UBICACION, PAIS, DEPARTAMENTO,
+        MUNICIPIO, DISTRITO, CODIGO_POSTAL, DIRECCION, TELEFONO, FECHA_APERTURA, ESTADO,
+        CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+    )
+    SELECT 
+        c.ID_CLINICA, c.NOMBRE_CLINICA, c.ID_UBICACION, u.PAIS, u.DEPARTAMENTO,
+        u.MUNICIPIO, u.DISTRITO, u.CODIGO_POSTAL, c.DIRECCION, c.TELEFONO, c.FECHA_APERTURA, c.ESTADO,
+        1, v_tipo, SYSDATE, DATE '2999-12-31', 'I',
+        RAWTOHEX(STANDARD_HASH(
+            NVL(c.NOMBRE_CLINICA, '~') || '|' ||
+            NVL(TO_CHAR(c.ID_UBICACION), '~') || '|' ||
+            NVL(c.DIRECCION, '~') || '|' ||
+            NVL(c.TELEFONO, '~') || '|' ||
+            NVL(c.ESTADO, '~'),
+            'SHA256'
+        ))
+    FROM stg_clinica_user.STG_CLINICAS c
+    INNER JOIN stg_clinica_user.STG_UBICACIONES u ON c.ID_UBICACION = u.ID_UBICACION
+    WHERE NOT EXISTS (
+        SELECT 1 FROM DIM_CLINICA d
+        WHERE d.BK_ID_CLINICA = c.ID_CLINICA
+          AND d.CURRENTFLAG = 1
+          AND d.ROWHASHVALUE = RAWTOHEX(STANDARD_HASH(
+              NVL(c.NOMBRE_CLINICA, '~') || '|' ||
+              NVL(TO_CHAR(c.ID_UBICACION), '~') || '|' ||
+              NVL(c.DIRECCION, '~') || '|' ||
+              NVL(c.TELEFONO, '~') || '|' ||
+              NVL(c.ESTADO, '~'),
+              'SHA256'
+          ))
+    );
+    v_ins := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_CLINICA ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_CLINICA: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_CLINICA;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_MEDICO (SCD Tipo 2)
+-- TABLA DESTINO: DIM_MEDICO
+-- TABLAS ORIGEN: stg_clinica_user.STG_MEDICOS, STG_CLINICAS
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_MEDICO (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_upd  NUMBER := 0;
+    v_ins  NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_MEDICO', 'SP_LOAD_DIM_MEDICO', v_tipo, v_audit_id);
+    -- 1. Caducar registros previos cuyos atributos cambiaron (SCD Tipo 2)
+    UPDATE DIM_MEDICO d
+    SET d.CURRENTFLAG     = 0,
+        d.FECHAFIN        = TRUNC(SYSDATE) - (1/86400),
+        d.TIPOTRANSACCION = 'U'
+    WHERE d.CURRENTFLAG = 1
+      AND EXISTS (
+          SELECT 1 
+          FROM stg_clinica_user.STG_MEDICOS s
+          WHERE s.ID_MEDICO = d.BK_ID_MEDICO
+            AND RAWTOHEX(STANDARD_HASH(
+                NVL(s.NOMBRES, '~') || '|' ||
+                NVL(s.APELLIDOS, '~') || '|' ||
+                NVL(TO_CHAR(s.ID_CLINICA), '~') || '|' ||
+                NVL(s.NUM_COLEGIADO, '~') || '|' ||
+                NVL(s.ESTADO, '~'),
+                'SHA256'
+            )) != d.ROWHASHVALUE
+      );
+    v_upd := SQL%ROWCOUNT;
+
+    -- 2. Insertar registros nuevos o nuevas versiones activas
+    INSERT INTO DIM_MEDICO (
+        BK_ID_MEDICO, NOMBRES, APELLIDOS, NOMBRE_COMPLETO,
+        BK_ID_CLINICA_BASE, NOMBRE_CLINICA_BASE, NUM_COLEGIADO, FECHA_INGRESO, ESTADO,
+        CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+    )
+    SELECT 
+        m.ID_MEDICO, m.NOMBRES, m.APELLIDOS, m.NOMBRES || ' ' || m.APELLIDOS,
+        m.ID_CLINICA, c.NOMBRE_CLINICA, m.NUM_COLEGIADO, m.FECHA_INGRESO, m.ESTADO,
+        1, v_tipo, SYSDATE, DATE '2999-12-31', 'I',
+        RAWTOHEX(STANDARD_HASH(
+            NVL(m.NOMBRES, '~') || '|' ||
+            NVL(m.APELLIDOS, '~') || '|' ||
+            NVL(TO_CHAR(m.ID_CLINICA), '~') || '|' ||
+            NVL(m.NUM_COLEGIADO, '~') || '|' ||
+            NVL(m.ESTADO, '~'),
+            'SHA256'
+        ))
+    FROM stg_clinica_user.STG_MEDICOS m
+    INNER JOIN stg_clinica_user.STG_CLINICAS c ON m.ID_CLINICA = c.ID_CLINICA
+    WHERE NOT EXISTS (
+        SELECT 1 FROM DIM_MEDICO d
+        WHERE d.BK_ID_MEDICO = m.ID_MEDICO
+          AND d.CURRENTFLAG = 1
+          AND d.ROWHASHVALUE = RAWTOHEX(STANDARD_HASH(
+              NVL(m.NOMBRES, '~') || '|' ||
+              NVL(m.APELLIDOS, '~') || '|' ||
+              NVL(TO_CHAR(m.ID_CLINICA), '~') || '|' ||
+              NVL(m.NUM_COLEGIADO, '~') || '|' ||
+              NVL(m.ESTADO, '~'),
+              'SHA256'
+          ))
+    );
+    v_ins := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_MEDICO ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_MEDICO: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_MEDICO;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_DIM_PACIENTE (SCD Tipo 2)
+-- TABLA DESTINO: DIM_PACIENTE
+-- TABLAS ORIGEN: stg_clinica_user.STG_PACIENTES, STG_UBICACIONES, 
+--                STG_CLINICAS, STG_EMPRESAS, STG_ASEGURADORAS
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_PACIENTE (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'FULL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_upd  NUMBER := 0;
+    v_ins  NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'FULL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_DIM', 'DIM_PACIENTE', 'SP_LOAD_DIM_PACIENTE', v_tipo, v_audit_id);
+    -- 1. Caducar registros previos cuyos atributos cambiaron (SCD Tipo 2: Residencia, Convenios Empresa/Aseguradora)
+    UPDATE DIM_PACIENTE d
+    SET d.CURRENTFLAG     = 0,
+        d.FECHAFIN        = TRUNC(SYSDATE) - (1/86400),
+        d.TIPOTRANSACCION = 'U'
+    WHERE d.CURRENTFLAG = 1
+      AND EXISTS (
+          SELECT 1 
+          FROM stg_clinica_user.STG_PACIENTES s
+          WHERE s.ID_PACIENTE = d.BK_ID_PACIENTE
+            AND RAWTOHEX(STANDARD_HASH(
+                NVL(s.DIRECCION, '~') || '|' ||
+                NVL(TO_CHAR(s.ID_UBICACION), '~') || '|' ||
+                NVL(TO_CHAR(s.ID_CLINICA_HABITUAL), '~') || '|' ||
+                NVL(TO_CHAR(s.ID_EMPRESA), '~') || '|' ||
+                NVL(TO_CHAR(s.ID_ASEGURADORA), '~') || '|' ||
+                NVL(s.NUMERO_POLIZA, '~'),
+                'SHA256'
+            )) != d.ROWHASHVALUE
+      );
+    v_upd := SQL%ROWCOUNT;
+
+    -- 2. Insertar registros nuevos o nuevas versiones activas
+    INSERT INTO DIM_PACIENTE (
+        BK_ID_PACIENTE, NOMBRES, APELLIDOS, NOMBRE_COMPLETO,
+        FECHA_NACIMIENTO, EDAD, GRUPO_ETARIO, SEXO, DIRECCION,
+        BK_ID_UBICACION, PAIS, DEPARTAMENTO, MUNICIPIO, DISTRITO, CODIGO_POSTAL,
+        BK_ID_CLINICA_HABITUAL, NOMBRE_CLINICA_HABITUAL,
+        BK_ID_EMPRESA, NOMBRE_EMPRESA, SECTOR_EMPRESA,
+        BK_ID_ASEGURADORA, NOMBRE_ASEGURADORA, TIPO_COBERTURA_ASEGURADORA,
+        NUMERO_POLIZA, FECHA_REGISTRO,
+        CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+    )
+    SELECT 
+        p.ID_PACIENTE, p.NOMBRES, p.APELLIDOS, p.NOMBRES || ' ' || p.APELLIDOS,
+        p.FECHA_NACIMIENTO,
+        TRUNC(MONTHS_BETWEEN(SYSDATE, p.FECHA_NACIMIENTO)/12) AS EDAD,
+        CASE 
+            WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, p.FECHA_NACIMIENTO)/12) < 18 THEN '0-17 Pediátrico'
+            WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, p.FECHA_NACIMIENTO)/12) BETWEEN 18 AND 29 THEN '18-29 Joven'
+            WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, p.FECHA_NACIMIENTO)/12) BETWEEN 30 AND 49 THEN '30-49 Adulto'
+            WHEN TRUNC(MONTHS_BETWEEN(SYSDATE, p.FECHA_NACIMIENTO)/12) BETWEEN 50 AND 64 THEN '50-64 Adulto Mayor'
+            ELSE '65+ Tercera Edad'
+        END AS GRUPO_ETARIO,
+        p.SEXO, p.DIRECCION, p.ID_UBICACION, u.PAIS, u.DEPARTAMENTO, u.MUNICIPIO, u.DISTRITO, u.CODIGO_POSTAL,
+        p.ID_CLINICA_HABITUAL, c.NOMBRE_CLINICA, p.ID_EMPRESA, e.NOMBRE_EMPRESA, e.SECTOR,
+        p.ID_ASEGURADORA, a.NOMBRE_ASEGURADORA, a.TIPO_COBERTURA, p.NUMERO_POLIZA, p.FECHA_REGISTRO,
+        1, v_tipo, SYSDATE, DATE '2999-12-31', 'I',
+        RAWTOHEX(STANDARD_HASH(
+            NVL(p.DIRECCION, '~') || '|' ||
+            NVL(TO_CHAR(p.ID_UBICACION), '~') || '|' ||
+            NVL(TO_CHAR(p.ID_CLINICA_HABITUAL), '~') || '|' ||
+            NVL(TO_CHAR(p.ID_EMPRESA), '~') || '|' ||
+            NVL(TO_CHAR(p.ID_ASEGURADORA), '~') || '|' ||
+            NVL(p.NUMERO_POLIZA, '~'),
+            'SHA256'
+        ))
+    FROM stg_clinica_user.STG_PACIENTES p
+    LEFT JOIN stg_clinica_user.STG_UBICACIONES u  ON p.ID_UBICACION = u.ID_UBICACION
+    LEFT JOIN stg_clinica_user.STG_CLINICAS c     ON p.ID_CLINICA_HABITUAL = c.ID_CLINICA
+    LEFT JOIN stg_clinica_user.STG_EMPRESAS e     ON p.ID_EMPRESA = e.ID_EMPRESA
+    LEFT JOIN stg_clinica_user.STG_ASEGURADORAS a ON p.ID_ASEGURADORA = a.ID_ASEGURADORA
+    WHERE NOT EXISTS (
+        SELECT 1 FROM DIM_PACIENTE d
+        WHERE d.BK_ID_PACIENTE = p.ID_PACIENTE
+          AND d.CURRENTFLAG = 1
+          AND d.ROWHASHVALUE = RAWTOHEX(STANDARD_HASH(
+              NVL(p.DIRECCION, '~') || '|' ||
+              NVL(TO_CHAR(p.ID_UBICACION), '~') || '|' ||
+              NVL(TO_CHAR(p.ID_CLINICA_HABITUAL), '~') || '|' ||
+              NVL(TO_CHAR(p.ID_EMPRESA), '~') || '|' ||
+              NVL(TO_CHAR(p.ID_ASEGURADORA), '~') || '|' ||
+              NVL(p.NUMERO_POLIZA, '~'),
+              'SHA256'
+          ))
+    );
+    v_ins := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_ins + v_upd, v_ins, v_upd, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_DIM_PACIENTE ejecutado: ' || v_upd || ' caducadas (SCD2), ' || v_ins || ' activas insertadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_DIM_PACIENTE: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_DIM_PACIENTE;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_FACT_CONSULTAS
+-- OBJETIVO:      Carga analítica de atenciones médicas y facturación acumulada
+--                con Surrogate Key Lookups y ventana incremental
+-- TABLA DESTINO: FACT_CONSULTAS
+-- TABLAS ORIGEN: stg_clinica_user.STG_CONSULTAS, STG_CONSULTAS_PROCEDIMIENTOS,
+--                STG_COBROS_CONSULTA, DIM_TIEMPO, DIM_PACIENTE, DIM_CLINICA,
+--                DIM_MEDICO, DIM_ESPECIALIDAD, DIM_TIPO_CONSULTA, DIM_UBICACION
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_CONSULTAS (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_CONSULTAS', 'SP_LOAD_FACT_CONSULTAS', v_tipo, v_audit_id);
+    MERGE INTO FACT_CONSULTAS f
+    USING (
+        WITH PROCEDIMIENTOS_AGREGADOS AS (
+            SELECT 
+                ID_CONSULTA,
+                COUNT(*) AS CANTIDAD_PROCEDIMIENTOS,
+                NVL(SUM(SUBTOTAL), 0) AS TOTAL_PROCEDIMIENTOS
+            FROM stg_clinica_user.STG_CONSULTAS_PROCEDIMIENTOS
+            GROUP BY ID_CONSULTA
+        )
+        SELECT 
+            c.ID_CONSULTA AS BK_ID_CONSULTA,
+            NVL(t.SK_TIEMPO, 19000101) AS SK_TIEMPO,
+            dp.SK_PACIENTE,
+            dc.SK_CLINICA,
+            dm.SK_MEDICO,
+            de.SK_ESPECIALIDAD,
+            dtc.SK_TIPO_CONSULTA,
+            du.SK_UBICACION AS SK_UBICACION_PACIENTE,
+            1 AS CANTIDAD_CONSULTAS,
+            c.PRECIO_CONSULTA AS PRECIO_HONORARIOS,
+            NVL(pa.CANTIDAD_PROCEDIMIENTOS, 0) AS CANTIDAD_PROCEDIMIENTOS,
+            NVL(pa.TOTAL_PROCEDIMIENTOS, 0) AS TOTAL_PROCEDIMIENTOS,
+            NVL(cob.MONTO_TOTAL_FACTURADO, (c.PRECIO_CONSULTA + NVL(pa.TOTAL_PROCEDIMIENTOS, 0))) AS MONTO_TOTAL_FACTURADO,
+            NVL(cob.MONTO_TOTAL_PAGADO, 0) AS MONTO_TOTAL_PAGADO,
+            NVL(cob.SALDO_PENDIENTE, (c.PRECIO_CONSULTA + NVL(pa.TOTAL_PROCEDIMIENTOS, 0) - NVL(cob.MONTO_TOTAL_PAGADO, 0))) AS SALDO_PENDIENTE,
+            NVL(cob.ESTADO_COBRO, 'PENDIENTE') AS ESTADO_COBRO,
+            CASE WHEN NVL(pa.CANTIDAD_PROCEDIMIENTOS, 0) > 0 THEN 'S' ELSE 'N' END AS TIENE_PROCEDIMIENTOS,
+            c.MOTIVO_CONSULTA,
+            RAWTOHEX(STANDARD_HASH(
+                TO_CHAR(c.ID_CONSULTA) || '|' ||
+                TO_CHAR(NVL(cob.MONTO_TOTAL_FACTURADO, 0), 'FM999999990.00') || '|' ||
+                TO_CHAR(NVL(cob.MONTO_TOTAL_PAGADO, 0), 'FM999999990.00') || '|' ||
+                NVL(cob.ESTADO_COBRO, 'PENDIENTE'),
+                'SHA256'
+            )) AS HASH_HECHO
+        FROM stg_clinica_user.STG_CONSULTAS c
+        LEFT JOIN DIM_TIEMPO t 
+            ON t.FECHA = TRUNC(c.FECHA_CONSULTA)
+        INNER JOIN DIM_PACIENTE dp 
+            ON dp.BK_ID_PACIENTE = c.ID_PACIENTE
+           AND (c.FECHA_CONSULTA BETWEEN dp.FECHAINICIO AND dp.FECHAFIN OR dp.CURRENTFLAG = 1)
+        INNER JOIN DIM_CLINICA dc 
+            ON dc.BK_ID_CLINICA = c.ID_CLINICA
+           AND (c.FECHA_CONSULTA BETWEEN dc.FECHAINICIO AND dc.FECHAFIN OR dc.CURRENTFLAG = 1)
+        INNER JOIN DIM_MEDICO dm 
+            ON dm.BK_ID_MEDICO = c.ID_MEDICO
+           AND (c.FECHA_CONSULTA BETWEEN dm.FECHAINICIO AND dm.FECHAFIN OR dm.CURRENTFLAG = 1)
+        INNER JOIN DIM_ESPECIALIDAD de 
+            ON de.BK_ID_ESPECIALIDAD = c.ID_ESPECIALIDAD
+        INNER JOIN DIM_TIPO_CONSULTA dtc 
+            ON dtc.BK_ID_TIPO_CONSULTA = c.ID_TIPO_CONSULTA
+        INNER JOIN DIM_UBICACION du 
+            ON du.BK_ID_UBICACION = dp.BK_ID_UBICACION
+        LEFT JOIN PROCEDIMIENTOS_AGREGADOS pa 
+            ON pa.ID_CONSULTA = c.ID_CONSULTA
+        LEFT JOIN stg_clinica_user.STG_COBROS_CONSULTA cob 
+            ON cob.ID_CONSULTA = c.ID_CONSULTA
+    ) s
+    ON (f.BK_ID_CONSULTA = s.BK_ID_CONSULTA)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_CONSULTA, SK_TIEMPO, SK_PACIENTE, SK_CLINICA, SK_MEDICO,
+            SK_ESPECIALIDAD, SK_TIPO_CONSULTA, SK_UBICACION_PACIENTE,
+            CANTIDAD_CONSULTAS, PRECIO_HONORARIOS, CANTIDAD_PROCEDIMIENTOS, TOTAL_PROCEDIMIENTOS,
+            MONTO_TOTAL_FACTURADO, MONTO_TOTAL_PAGADO, SALDO_PENDIENTE,
+            ESTADO_COBRO, TIENE_PROCEDIMIENTOS, MOTIVO_CONSULTA,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.BK_ID_CONSULTA, s.SK_TIEMPO, s.SK_PACIENTE, s.SK_CLINICA, s.SK_MEDICO,
+            s.SK_ESPECIALIDAD, s.SK_TIPO_CONSULTA, s.SK_UBICACION_PACIENTE,
+            s.CANTIDAD_CONSULTAS, s.PRECIO_HONORARIOS, s.CANTIDAD_PROCEDIMIENTOS, s.TOTAL_PROCEDIMIENTOS,
+            s.MONTO_TOTAL_FACTURADO, s.MONTO_TOTAL_PAGADO, s.SALDO_PENDIENTE,
+            s.ESTADO_COBRO, s.TIENE_PROCEDIMIENTOS, s.MOTIVO_CONSULTA,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.HASH_HECHO
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            f.MONTO_TOTAL_FACTURADO = s.MONTO_TOTAL_FACTURADO,
+            f.MONTO_TOTAL_PAGADO    = s.MONTO_TOTAL_PAGADO,
+            f.SALDO_PENDIENTE       = s.SALDO_PENDIENTE,
+            f.ESTADO_COBRO          = s.ESTADO_COBRO,
+            f.FECHAINICIO           = SYSDATE,
+            f.TIPOTRANSACCION       = 'U',
+            f.ROWHASHVALUE          = s.HASH_HECHO
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_CONSULTAS ejecutado: ' || v_cant || ' filas procesadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_CONSULTAS: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_FACT_CONSULTAS;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS
+-- OBJETIVO:      Carga del análisis epidemiológico y distribución del costo
+--                prorrateado por patología diagnosticada
+-- TABLA DESTINO: FACT_CONSULTA_DIAGNOSTICOS
+-- TABLAS ORIGEN: stg_clinica_user.STG_DIAGNOSTICOS, FACT_CONSULTAS, DIM_ENFERMEDAD
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_CONSULTA_DIAGNOSTICOS', 'SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS', v_tipo, v_audit_id);
+    MERGE INTO FACT_CONSULTA_DIAGNOSTICOS f
+    USING (
+        WITH CONTEO_DIAG AS (
+            SELECT 
+                ID_CONSULTA,
+                COUNT(*) AS TOTAL_DIAG
+            FROM stg_clinica_user.STG_DIAGNOSTICOS
+            GROUP BY ID_CONSULTA
+        )
+        SELECT 
+            d.ID_DIAGNOSTICO AS BK_ID_DIAGNOSTICO,
+            d.ID_CONSULTA    AS BK_ID_CONSULTA,
+            fc.SK_TIEMPO,
+            fc.SK_PACIENTE,
+            fc.SK_CLINICA,
+            fc.SK_MEDICO,
+            fc.SK_ESPECIALIDAD,
+            denf.SK_ENFERMEDAD,
+            fc.SK_UBICACION_PACIENTE,
+            1 AS CONTEO_DIAGNOSTICO,
+            cd.TOTAL_DIAG AS TOTAL_DIAGNOSTICOS_CONS,
+            fc.MONTO_TOTAL_FACTURADO AS MONTO_TOTAL_CONSULTA,
+            ROUND(fc.MONTO_TOTAL_FACTURADO / cd.TOTAL_DIAG, 2) AS MONTO_PRORRATEADO,
+            d.OBSERVACIONES,
+            RAWTOHEX(STANDARD_HASH(
+                TO_CHAR(d.ID_DIAGNOSTICO) || '|' ||
+                TO_CHAR(denf.SK_ENFERMEDAD) || '|' ||
+                TO_CHAR(ROUND(fc.MONTO_TOTAL_FACTURADO / cd.TOTAL_DIAG, 2), 'FM999999990.00'),
+                'SHA256'
+            )) AS HASH_HECHO
+        FROM stg_clinica_user.STG_DIAGNOSTICOS d
+        INNER JOIN CONTEO_DIAG cd 
+            ON cd.ID_CONSULTA = d.ID_CONSULTA
+        INNER JOIN FACT_CONSULTAS fc 
+            ON fc.BK_ID_CONSULTA = d.ID_CONSULTA
+        INNER JOIN DIM_ENFERMEDAD denf 
+            ON denf.BK_ID_ENFERMEDAD = d.ID_ENFERMEDAD
+    ) s
+    ON (f.BK_ID_DIAGNOSTICO = s.BK_ID_DIAGNOSTICO)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_DIAGNOSTICO, BK_ID_CONSULTA, SK_TIEMPO, SK_PACIENTE, SK_CLINICA,
+            SK_MEDICO, SK_ESPECIALIDAD, SK_ENFERMEDAD, SK_UBICACION_PACIENTE,
+            CONTEO_DIAGNOSTICO, TOTAL_DIAGNOSTICOS_CONS, MONTO_TOTAL_CONSULTA, MONTO_PRORRATEADO,
+            OBSERVACIONES,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.BK_ID_DIAGNOSTICO, s.BK_ID_CONSULTA, s.SK_TIEMPO, s.SK_PACIENTE, s.SK_CLINICA,
+            s.SK_MEDICO, s.SK_ESPECIALIDAD, s.SK_ENFERMEDAD, s.SK_UBICACION_PACIENTE,
+            s.CONTEO_DIAGNOSTICO, s.TOTAL_DIAGNOSTICOS_CONS, s.MONTO_TOTAL_CONSULTA, s.MONTO_PRORRATEADO,
+            s.OBSERVACIONES,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.HASH_HECHO
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            f.MONTO_TOTAL_CONSULTA = s.MONTO_TOTAL_CONSULTA,
+            f.MONTO_PRORRATEADO    = s.MONTO_PRORRATEADO,
+            f.OBSERVACIONES        = s.OBSERVACIONES,
+            f.FECHAINICIO          = SYSDATE,
+            f.TIPOTRANSACCION      = 'U',
+            f.ROWHASHVALUE         = s.HASH_HECHO
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS ejecutado: ' || v_cant || ' filas procesadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO: SP_LOAD_FACT_COBROS_DISTRIBUCION
+-- OBJETIVO:      Carga del análisis de recaudación, saldos por pagador
+--                (Particular, Empresa, Aseguradora) y forma de pago
+-- TABLA DESTINO: FACT_COBROS_DISTRIBUCION
+-- TABLAS ORIGEN: stg_clinica_user.STG_DISTRIBUCION_COBRO, STG_COBROS_CONSULTA,
+--                FACT_CONSULTAS, DIM_PAGADOR, STG_TRANSACCIONES_PAGO, DIM_FORMA_PAGO
+-- ESQUEMA:       dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_FACT_COBROS_DISTRIBUCION (
+    p_tipo_carga IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_batch_id   IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+    v_cant NUMBER := 0;
+    v_tipo VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_FACT', 'FACT_COBROS_DISTRIBUCION', 'SP_LOAD_FACT_COBROS_DISTRIBUCION', v_tipo, v_audit_id);
+    MERGE INTO FACT_COBROS_DISTRIBUCION f
+    USING (
+        WITH FORMA_PAGO_PREDOMINANTE AS (
+            SELECT 
+                ID_DISTRIBUCION,
+                ID_FORMA_PAGO,
+                ROW_NUMBER() OVER (PARTITION BY ID_DISTRIBUCION ORDER BY MONTO_TRANSACCION DESC) AS RN
+            FROM stg_clinica_user.STG_TRANSACCIONES_PAGO
+        )
+        SELECT 
+            dist.ID_DISTRIBUCION AS BK_ID_DISTRIBUCION,
+            dist.ID_COBRO        AS BK_ID_COBRO,
+            cob.ID_CONSULTA      AS BK_ID_CONSULTA,
+            fc.SK_TIEMPO,
+            fc.SK_PACIENTE,
+            fc.SK_CLINICA,
+            dpag.SK_PAGADOR,
+            NVL(dfp.SK_FORMA_PAGO, 1) AS SK_FORMA_PAGO_PREDOMINANTE,
+            dist.PORCENTAJE      AS PORCENTAJE_COBERTURA,
+            dist.MONTO_ASIGNADO,
+            dist.MONTO_PAGADO,
+            dist.SALDO_PENDIENTE,
+            dist.ESTADO          AS ESTADO_DISTRIBUCION,
+            dist.TIPO_PAGADOR,
+            RAWTOHEX(STANDARD_HASH(
+                TO_CHAR(dist.ID_DISTRIBUCION) || '|' ||
+                TO_CHAR(dist.MONTO_ASIGNADO, 'FM999999990.00') || '|' ||
+                TO_CHAR(dist.MONTO_PAGADO, 'FM999999990.00') || '|' ||
+                dist.ESTADO,
+                'SHA256'
+            )) AS HASH_HECHO
+        FROM stg_clinica_user.STG_DISTRIBUCION_COBRO dist
+        INNER JOIN stg_clinica_user.STG_COBROS_CONSULTA cob 
+            ON cob.ID_COBRO = dist.ID_COBRO
+        INNER JOIN FACT_CONSULTAS fc 
+            ON fc.BK_ID_CONSULTA = cob.ID_CONSULTA
+        INNER JOIN DIM_PAGADOR dpag 
+            ON dpag.TIPO_PAGADOR = dist.TIPO_PAGADOR
+           AND dpag.BK_ID_ORIGEN = CASE 
+               WHEN dist.TIPO_PAGADOR = 'PACIENTE'    THEN dist.ID_PACIENTE
+               WHEN dist.TIPO_PAGADOR = 'EMPRESA'     THEN dist.ID_EMPRESA
+               WHEN dist.TIPO_PAGADOR = 'ASEGURADORA' THEN dist.ID_ASEGURADORA
+           END
+        LEFT JOIN FORMA_PAGO_PREDOMINANTE fpp 
+            ON fpp.ID_DISTRIBUCION = dist.ID_DISTRIBUCION AND fpp.RN = 1
+        LEFT JOIN DIM_FORMA_PAGO dfp 
+            ON dfp.BK_ID_FORMA_PAGO = fpp.ID_FORMA_PAGO
+    ) s
+    ON (f.BK_ID_DISTRIBUCION = s.BK_ID_DISTRIBUCION)
+    WHEN NOT MATCHED THEN
+        INSERT (
+            BK_ID_DISTRIBUCION, BK_ID_COBRO, BK_ID_CONSULTA,
+            SK_TIEMPO, SK_PACIENTE, SK_CLINICA, SK_PAGADOR, SK_FORMA_PAGO_PREDOMINANTE,
+            PORCENTAJE_COBERTURA, MONTO_ASIGNADO, MONTO_PAGADO, SALDO_PENDIENTE,
+            ESTADO_DISTRIBUCION, TIPO_PAGADOR,
+            CURRENTFLAG, TIPOCARGA, FECHAINICIO, FECHAFIN, TIPOTRANSACCION, ROWHASHVALUE
+        )
+        VALUES (
+            s.BK_ID_DISTRIBUCION, s.BK_ID_COBRO, s.BK_ID_CONSULTA,
+            s.SK_TIEMPO, s.SK_PACIENTE, s.SK_CLINICA, s.SK_PAGADOR, s.SK_FORMA_PAGO_PREDOMINANTE,
+            s.PORCENTAJE_COBERTURA, s.MONTO_ASIGNADO, s.MONTO_PAGADO, s.SALDO_PENDIENTE,
+            s.ESTADO_DISTRIBUCION, s.TIPO_PAGADOR,
+            1, v_tipo, SYSDATE, DATE '2999-12-31', 'I', s.HASH_HECHO
+        )
+    WHEN MATCHED THEN
+        UPDATE SET
+            f.MONTO_PAGADO        = s.MONTO_PAGADO,
+            f.SALDO_PENDIENTE     = s.SALDO_PENDIENTE,
+            f.ESTADO_DISTRIBUCION = s.ESTADO_DISTRIBUCION,
+            f.FECHAINICIO         = SYSDATE,
+            f.TIPOTRANSACCION     = 'U',
+            f.ROWHASHVALUE        = s.HASH_HECHO
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+
+    v_cant := SQL%ROWCOUNT;
+    COMMIT;
+    SP_AUDIT_END(v_audit_id, v_cant, v_cant, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('SP_LOAD_FACT_COBROS_DISTRIBUCION ejecutado: ' || v_cant || ' filas procesadas.');
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('Error en SP_LOAD_FACT_COBROS_DISTRIBUCION: ' || SQLERRM);
+        RAISE;
+END SP_LOAD_FACT_COBROS_DISTRIBUCION;
+/
+
+-- ============================================================================
+-- PROCEDIMIENTO MAESTRO: SP_LOAD_DWH_MASTER
+-- OBJETIVO: Orquestador end-to-end de extracción y carga analítica en el DWH.
+--           Invoca de forma modular y secuencial cada procedimiento individual
+--           por cada tabla de dimensión y tabla de hechos.
+--           Registra auditoría integral en CTL_ETL_AUDIT.
+-- ESQUEMA: dwh_clinica_user | MOTOR: Oracle Database
+-- ============================================================================
+
+CREATE OR REPLACE PROCEDURE SP_LOAD_DWH_MASTER (
+    p_tipo_carga    IN VARCHAR2 DEFAULT 'INCREMENTAL',
+    p_dias_lookback IN NUMBER   DEFAULT 3,
+    p_fecha_corte   IN DATE     DEFAULT NULL,
+    p_batch_id      IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_inicio   TIMESTAMP := SYSTIMESTAMP;
+    v_tipo     VARCHAR2(20) := UPPER(NVL(p_tipo_carga, 'INCREMENTAL'));
+    v_dias     NUMBER := NVL(p_dias_lookback, 3);
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'ORCHESTRATOR', 'DWH_ALL', 'SP_LOAD_DWH_MASTER', v_tipo, v_audit_id);
+
+    DBMS_OUTPUT.PUT_LINE('================================================================');
+    DBMS_OUTPUT.PUT_LINE('INICIO DEL PIPELINE ANALÍTICO COMPLETO: DWH RED DE CLÍNICAS');
+    DBMS_OUTPUT.PUT_LINE('Batch ID: ' || v_batch_id);
+    DBMS_OUTPUT.PUT_LINE('Modo de Carga: ' || v_tipo || 
+                         ' | Ventana Días Lookback: ' || v_dias);
+    DBMS_OUTPUT.PUT_LINE('Timestamp: ' || TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('================================================================');
+
+    -- Paso 1: Extracción desde OLTP hacia Staging con ventana optimizada
+    DBMS_OUTPUT.PUT_LINE('>>> 1. EJECUTANDO EXTRACCIÓN HACIA STAGING...');
+    stg_clinica_user.SP_EXTRACT_OLTP_TO_STG(v_tipo, v_dias, p_fecha_corte, v_batch_id);
+
+    -- Paso 2: Carga de Dimensiones SCD Tipo 1 y Tiempo (Sobreescritura con Hash)
+    DBMS_OUTPUT.PUT_LINE('>>> 2. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 1 Y TIEMPO...');
+    SP_LOAD_DIM_TIEMPO(2024, 2030, v_batch_id);
+    SP_LOAD_DIM_UBICACION(v_tipo, v_batch_id);
+    SP_LOAD_DIM_ESPECIALIDAD(v_tipo, v_batch_id);
+    SP_LOAD_DIM_ENFERMEDAD(v_tipo, v_batch_id);
+    SP_LOAD_DIM_TIPO_CONSULTA(v_tipo, v_batch_id);
+    SP_LOAD_DIM_FORMA_PAGO(v_tipo, v_batch_id);
+    SP_LOAD_DIM_PAGADOR(v_tipo, v_batch_id);
+
+    -- Paso 3: Carga de Dimensiones SCD Tipo 2 (Históricas / Caducidad + Nueva Versión)
+    DBMS_OUTPUT.PUT_LINE('>>> 3. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 2...');
+    SP_LOAD_DIM_CLINICA(v_tipo, v_batch_id);
+    SP_LOAD_DIM_MEDICO(v_tipo, v_batch_id);
+    SP_LOAD_DIM_PACIENTE(v_tipo, v_batch_id);
+
+    -- Paso 4: Carga de Tablas de Hechos (Fact Tables con SK Lookups)
+    DBMS_OUTPUT.PUT_LINE('>>> 4. EJECUTANDO CARGA DE TABLAS DE HECHOS...');
+    SP_LOAD_FACT_CONSULTAS(v_tipo, v_batch_id);
+    SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS(v_tipo, v_batch_id);
+    SP_LOAD_FACT_COBROS_DISTRIBUCION(v_tipo, v_batch_id);
+
+    SP_AUDIT_END(v_audit_id, 0, 0, 0, 0, 'SUCCESS');
+
+    DBMS_OUTPUT.PUT_LINE('================================================================');
+    DBMS_OUTPUT.PUT_LINE('PIPELINE DWH MASTER FINALIZADO EXITOSAMENTE');
+    DBMS_OUTPUT.PUT_LINE('Duración total: ' || TO_CHAR(SYSTIMESTAMP - v_inicio));
+    DBMS_OUTPUT.PUT_LINE('================================================================');
+
+EXCEPTION
+    WHEN OTHERS THEN
+        ROLLBACK;
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        DBMS_OUTPUT.PUT_LINE('*** ERROR CRÍTICO EN SP_LOAD_DWH_MASTER: ' || SQLERRM || ' ***');
+        RAISE;
+END SP_LOAD_DWH_MASTER;
+/
