@@ -36,7 +36,7 @@
     <action>
       <name>Carga DIM_TIEMPO</name>
       <type>SQL</type>
-      <sql>BEGIN dwh_clinica_user.SP_LOAD_DIM_TIEMPO(2024, 2030, '${BATCH_ID}'); END;</sql>
+      <sql>BEGIN dwh_clinica_user.SP_LOAD_DIM_TIEMPO(2019, 2030, '${BATCH_ID}'); END;</sql>
       <useVariableSubstitution>Y</useVariableSubstitution>
       <sqlfromfile>N</sqlfromfile>
       <sendOneStatement>Y</sendOneStatement>

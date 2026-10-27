@@ -26,7 +26,7 @@ flowchart TD
     end
 
     subgraph DWH["Capa Data Warehouse (dwh_clinica_user)"]
-        D_T["DIM_TIEMPO<br/>(2024 al 2030 + 19000101)"]
+        D_T["DIM_TIEMPO<br/>(2019 al 2030 + 19000101)"]
         D_SCD1["6 Dimensiones SCD Tipo 1<br/>(Ubicación, Especialidad, Enfermedad,<br/>Tipo Consulta, Forma Pago, Pagador)"]
         D_SCD2["3 Dimensiones SCD Tipo 2<br/>(Paciente, Médico, Clínica)<br/>Histórico de Versiones"]
         F1["FACT_CONSULTAS<br/>(1 fila x atención médica)"]
@@ -470,7 +470,7 @@ Resultado de la corrida de validación de `SP_LOAD_DWH_MASTER('INCREMENTAL', 1)`
 | 20    | `BATCH_20261022_143825` | STAGING          | `STG_TRANSACCIONES_PAGO`       | `INCREMENTAL` | 0.04 s     | 0          | 0            | **SUCCESS** |
 | 21    | `BATCH_20261022_143825` | STAGING          | `STG_COBROS_CONSULTA`          | `INCREMENTAL` | 3.99 s     | 0          | 0            | **SUCCESS** |
 | 22    | `BATCH_20261022_143825` | STAGING          | `STG_DISTRIBUCION_COBRO`       | `INCREMENTAL` | 0.02 s     | 0          | 0            | **SUCCESS** |
-| 23    | `BATCH_20261022_143825` | DWH_DIM          | `DIM_TIEMPO`                   | `FULL`        | 0.05 s     | 2,557      | 0            | **SUCCESS** |
+| 23    | `BATCH_20261022_143825` | DWH_DIM          | `DIM_TIEMPO`                   | `FULL`        | 0.05 s     | 4,383      | 0            | **SUCCESS** |
 | 24    | `BATCH_20261022_143825` | DWH_DIM          | `DIM_UBICACION`                | `INCREMENTAL` | 0.01 s     | 0          | 0            | **SUCCESS** |
 | 25    | `BATCH_20261022_143825` | DWH_DIM          | `DIM_ESPECIALIDAD`             | `INCREMENTAL` | 0.00 s     | 0          | 0            | **SUCCESS** |
 | 26    | `BATCH_20261022_143825` | DWH_DIM          | `DIM_ENFERMEDAD`               | `INCREMENTAL` | 0.00 s     | 0          | 0            | **SUCCESS** |

@@ -729,7 +729,7 @@ GRANT EXECUTE ON SP_AUDIT_ERROR TO stg_clinica_user;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_POBLAR_DIM_TIEMPO (
-    p_anio_inicio IN NUMBER DEFAULT 2024,
+    p_anio_inicio IN NUMBER   DEFAULT 2019,
     p_anio_fin    IN NUMBER   DEFAULT 2030,
     p_batch_id    IN VARCHAR2 DEFAULT NULL
 )
@@ -920,7 +920,7 @@ END SP_POBLAR_DIM_TIEMPO;
 -- ============================================================================
 
 CREATE OR REPLACE PROCEDURE SP_LOAD_DIM_TIEMPO (
-    p_anio_inicio IN NUMBER   DEFAULT 2024,
+    p_anio_inicio IN NUMBER   DEFAULT 2019,
     p_anio_fin    IN NUMBER   DEFAULT 2030,
     p_batch_id    IN VARCHAR2 DEFAULT NULL
 )
@@ -1720,6 +1720,7 @@ BEGIN
         )
     WHEN MATCHED THEN
         UPDATE SET
+            f.SK_TIEMPO             = s.SK_TIEMPO,
             f.MONTO_TOTAL_FACTURADO = s.MONTO_TOTAL_FACTURADO,
             f.MONTO_TOTAL_PAGADO    = s.MONTO_TOTAL_PAGADO,
             f.SALDO_PENDIENTE       = s.SALDO_PENDIENTE,
@@ -1727,7 +1728,7 @@ BEGIN
             f.FECHAINICIO           = SYSDATE,
             f.TIPOTRANSACCION       = 'U',
             f.ROWHASHVALUE          = s.HASH_HECHO
-        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO OR f.SK_TIEMPO != s.SK_TIEMPO;
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
@@ -1822,13 +1823,14 @@ BEGIN
         )
     WHEN MATCHED THEN
         UPDATE SET
+            f.SK_TIEMPO            = s.SK_TIEMPO,
             f.MONTO_TOTAL_CONSULTA = s.MONTO_TOTAL_CONSULTA,
             f.MONTO_PRORRATEADO    = s.MONTO_PRORRATEADO,
             f.OBSERVACIONES        = s.OBSERVACIONES,
             f.FECHAINICIO          = SYSDATE,
             f.TIPOTRANSACCION      = 'U',
             f.ROWHASHVALUE         = s.HASH_HECHO
-        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO OR f.SK_TIEMPO != s.SK_TIEMPO;
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
@@ -1934,13 +1936,14 @@ BEGIN
         )
     WHEN MATCHED THEN
         UPDATE SET
+            f.SK_TIEMPO           = s.SK_TIEMPO,
             f.MONTO_PAGADO        = s.MONTO_PAGADO,
             f.SALDO_PENDIENTE     = s.SALDO_PENDIENTE,
             f.ESTADO_DISTRIBUCION = s.ESTADO_DISTRIBUCION,
             f.FECHAINICIO         = SYSDATE,
             f.TIPOTRANSACCION     = 'U',
             f.ROWHASHVALUE        = s.HASH_HECHO
-        WHERE f.ROWHASHVALUE != s.HASH_HECHO;
+        WHERE f.ROWHASHVALUE != s.HASH_HECHO OR f.SK_TIEMPO != s.SK_TIEMPO;
 
     v_cant := SQL%ROWCOUNT;
     COMMIT;
@@ -1997,7 +2000,7 @@ BEGIN
 
     -- Paso 2: Carga de Dimensiones SCD Tipo 1 y Tiempo (Sobreescritura con Hash)
     DBMS_OUTPUT.PUT_LINE('>>> 2. EJECUTANDO CARGA DE DIMENSIONES SCD TIPO 1 Y TIEMPO...');
-    SP_LOAD_DIM_TIEMPO(2024, 2030, v_batch_id);
+    SP_LOAD_DIM_TIEMPO(2019, 2030, v_batch_id);
     SP_LOAD_DIM_UBICACION(v_tipo, v_batch_id);
     SP_LOAD_DIM_ESPECIALIDAD(v_tipo, v_batch_id);
     SP_LOAD_DIM_ENFERMEDAD(v_tipo, v_batch_id);
