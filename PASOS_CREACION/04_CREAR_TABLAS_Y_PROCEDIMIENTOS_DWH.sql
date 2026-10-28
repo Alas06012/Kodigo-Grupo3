@@ -2020,6 +2020,10 @@ BEGIN
     SP_LOAD_FACT_CONSULTA_DIAGNOSTICOS(v_tipo, v_batch_id);
     SP_LOAD_FACT_COBROS_DISTRIBUCION(v_tipo, v_batch_id);
 
+    -- Paso 5: Refresco de Vistas Materializadas Analiticas
+    DBMS_OUTPUT.PUT_LINE('>>> 5. REFLEJANDO AGREGACIONES EN VISTAS MATERIALIZADAS...');
+    SP_REFRESH_MATERIALIZED_VIEWS(v_batch_id);
+
     SP_AUDIT_END(v_audit_id, 0, 0, 0, 0, 'SUCCESS');
 
     DBMS_OUTPUT.PUT_LINE('================================================================');

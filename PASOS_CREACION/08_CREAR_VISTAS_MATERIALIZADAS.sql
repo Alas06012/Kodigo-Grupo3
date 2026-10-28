@@ -1,0 +1,247 @@
+/* ============================================================================
+   PASO 08: VISTAS MATERIALIZADAS ANALÍTICAS Y PROCEDIMIENTO DE REFRESCO
+   ============================================================================
+   USUARIO DE CONEXION: dwh_clinica_user
+   CONTRASEÑA:          DwhPass2026
+   CONTENEDOR (PDB):    XEPDB1
+   HOST / PUERTO:       localhost:1521
+   ============================================================================
+   OBJETIVO:
+     Crear las 5 Vistas Materializadas de aceleración analítica sobre el modelo
+     en estrella para optimizar los reportes ejecutivos:
+       1. MV_VISITAS_POR_ESPECIALIDAD        (Demanda y facturación por especialidad)
+       2. MV_COSTO_POR_CLINICA               (Productividad y ticket promedio por sede)
+       3. MV_RECURRENCIA_PACIENTES           (Frecuencia y retención mensual de pacientes)
+       4. MV_RENDIMIENTO_MEDICOS             (Consultas y honorarios por profesional médico)
+       5. MV_COBERTURA_SEGUROS_PAGADORES     (Copagos, coberturas y distribución financiera)
+
+   ESTRATEGIA DE REFRESCO:
+     - BUILD IMMEDIATE: Se pueblan en disco con datos al momento de la creación.
+     - REFRESH COMPLETE ON DEMAND: Refresco atómico completo invocado por el pipeline
+       mediante el procedimiento SP_REFRESH_MATERIALIZED_VIEWS.
+   ============================================================================ */
+
+ALTER SESSION SET CONTAINER = XEPDB1;
+
+PROMPT ============================================================================
+PROMPT CREANDO LAS 5 VISTAS MATERIALIZADAS EN dwh_clinica_user...
+PROMPT ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. VISTA MATERIALIZADA: MV_VISITAS_POR_ESPECIALIDAD
+-- ----------------------------------------------------------------------------
+PROMPT >>> [1/5] Creando MV_VISITAS_POR_ESPECIALIDAD...
+CREATE MATERIALIZED VIEW MV_VISITAS_POR_ESPECIALIDAD
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT 
+    t.ANIO,
+    t.TRIMESTRE,
+    t.NOMBRE_MES,
+    t.MES,
+    esp.SK_ESPECIALIDAD,
+    esp.BK_ID_ESPECIALIDAD,
+    esp.NOMBRE_ESPECIALIDAD,
+    tc.NOMBRE_TIPO AS MODALIDAD_CONSULTA,
+    COUNT(*) AS TOTAL_VISITAS,
+    SUM(f.CANTIDAD_PROCEDIMIENTOS) AS TOTAL_PROCEDIMIENTOS,
+    ROUND(SUM(f.PRECIO_HONORARIOS), 2) AS TOTAL_HONORARIOS,
+    ROUND(SUM(f.TOTAL_PROCEDIMIENTOS), 2) AS TOTAL_MONTO_PROCEDIMIENTOS,
+    ROUND(SUM(f.MONTO_TOTAL_FACTURADO), 2) AS TOTAL_FACTURADO,
+    ROUND(SUM(f.MONTO_TOTAL_PAGADO), 2) AS TOTAL_RECAUDADO,
+    ROUND(SUM(f.SALDO_PENDIENTE), 2) AS TOTAL_SALDO_PENDIENTE
+FROM FACT_CONSULTAS f
+INNER JOIN DIM_TIEMPO t ON t.SK_TIEMPO = f.SK_TIEMPO
+INNER JOIN DIM_ESPECIALIDAD esp ON esp.SK_ESPECIALIDAD = f.SK_ESPECIALIDAD
+INNER JOIN DIM_TIPO_CONSULTA tc ON tc.SK_TIPO_CONSULTA = f.SK_TIPO_CONSULTA
+GROUP BY 
+    t.ANIO, t.TRIMESTRE, t.NOMBRE_MES, t.MES,
+    esp.SK_ESPECIALIDAD, esp.BK_ID_ESPECIALIDAD, esp.NOMBRE_ESPECIALIDAD,
+    tc.NOMBRE_TIPO;
+
+COMMENT ON MATERIALIZED VIEW MV_VISITAS_POR_ESPECIALIDAD IS 'Data Mart agregado: Volumen, demanda y facturacion desglosada por especialidad y modalidad';
+
+-- ----------------------------------------------------------------------------
+-- 2. VISTA MATERIALIZADA: MV_COSTO_POR_CLINICA
+-- ----------------------------------------------------------------------------
+PROMPT >>> [2/5] Creando MV_COSTO_POR_CLINICA...
+CREATE MATERIALIZED VIEW MV_COSTO_POR_CLINICA
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT 
+    t.ANIO,
+    t.NOMBRE_MES,
+    t.MES,
+    c.SK_CLINICA,
+    c.BK_ID_CLINICA,
+    c.NOMBRE_CLINICA,
+    c.DEPARTAMENTO AS DEPARTAMENTO_CLINICA,
+    c.MUNICIPIO AS MUNICIPIO_CLINICA,
+    c.ESTADO AS ESTADO_OPERATIVO,
+    COUNT(DISTINCT f.SK_PACIENTE) AS TOTAL_PACIENTES_UNICOS,
+    COUNT(*) AS TOTAL_CONSULTAS_ATENDIDAS,
+    SUM(f.CANTIDAD_PROCEDIMIENTOS) AS TOTAL_PROCEDIMIENTOS,
+    ROUND(SUM(f.MONTO_TOTAL_FACTURADO), 2) AS FACTURACION_TOTAL,
+    ROUND(SUM(f.MONTO_TOTAL_PAGADO), 2) AS RECAUDACION_TOTAL,
+    ROUND(SUM(f.SALDO_PENDIENTE), 2) AS CARTERA_PENDIENTE,
+    ROUND(AVG(f.MONTO_TOTAL_FACTURADO), 2) AS TICKET_PROMEDIO_POR_CONSULTA,
+    ROUND(AVG(f.PRECIO_HONORARIOS), 2) AS HONORARIO_PROMEDIO,
+    ROUND(AVG(f.TOTAL_PROCEDIMIENTOS), 2) AS PROCEDIMIENTO_PROMEDIO
+FROM FACT_CONSULTAS f
+INNER JOIN DIM_TIEMPO t ON t.SK_TIEMPO = f.SK_TIEMPO
+INNER JOIN DIM_CLINICA c ON c.SK_CLINICA = f.SK_CLINICA
+GROUP BY 
+    t.ANIO, t.NOMBRE_MES, t.MES,
+    c.SK_CLINICA, c.BK_ID_CLINICA, c.NOMBRE_CLINICA,
+    c.DEPARTAMENTO, c.MUNICIPIO, c.ESTADO;
+
+COMMENT ON MATERIALIZED VIEW MV_COSTO_POR_CLINICA IS 'Data Mart agregado: Productividad asistencial, recaudacion y ticket promedio por sede clinica';
+
+-- ----------------------------------------------------------------------------
+-- 3. VISTA MATERIALIZADA: MV_RECURRENCIA_PACIENTES
+-- ----------------------------------------------------------------------------
+PROMPT >>> [3/5] Creando MV_RECURRENCIA_PACIENTES...
+CREATE MATERIALIZED VIEW MV_RECURRENCIA_PACIENTES
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT 
+    t.ANIO,
+    t.MES,
+    t.NOMBRE_MES,
+    p.SK_PACIENTE,
+    p.BK_ID_PACIENTE,
+    p.SEXO,
+    p.GRUPO_ETARIO,
+    p.NOMBRE_EMPRESA,
+    u.DEPARTAMENTO AS DEPARTAMENTO_PACIENTE,
+    u.MUNICIPIO AS MUNICIPIO_PACIENTE,
+    COUNT(*) AS NUMERO_VISITAS_MES,
+    CASE 
+        WHEN COUNT(*) = 1 THEN '1 Visita (Esporadico)'
+        WHEN COUNT(*) BETWEEN 2 AND 3 THEN '2-3 Visitas (Recurrente)'
+        ELSE '> 3 Visitas (Alta Frecuencia)'
+    END AS SEGMENTO_RECURRENCIA,
+    ROUND(SUM(f.MONTO_TOTAL_FACTURADO), 2) AS FACTURACION_PACIENTE_MES,
+    ROUND(SUM(f.MONTO_TOTAL_PAGADO), 2) AS RECAUDO_PACIENTE_MES,
+    ROUND(SUM(f.SALDO_PENDIENTE), 2) AS SALDO_PENDIENTE_MES
+FROM FACT_CONSULTAS f
+INNER JOIN DIM_TIEMPO t ON t.SK_TIEMPO = f.SK_TIEMPO
+INNER JOIN DIM_PACIENTE p ON p.SK_PACIENTE = f.SK_PACIENTE
+INNER JOIN DIM_UBICACION u ON u.SK_UBICACION = f.SK_UBICACION_PACIENTE
+GROUP BY 
+    t.ANIO, t.MES, t.NOMBRE_MES,
+    p.SK_PACIENTE, p.BK_ID_PACIENTE, p.SEXO, p.GRUPO_ETARIO, p.NOMBRE_EMPRESA,
+    u.DEPARTAMENTO, u.MUNICIPIO;
+
+COMMENT ON MATERIALIZED VIEW MV_RECURRENCIA_PACIENTES IS 'Data Mart agregado: Segmentacion de recurrencia y frecuencia de visitas mensuales por paciente';
+
+-- ----------------------------------------------------------------------------
+-- 4. VISTA MATERIALIZADA: MV_RENDIMIENTO_MEDICOS
+-- ----------------------------------------------------------------------------
+PROMPT >>> [4/5] Creando MV_RENDIMIENTO_MEDICOS...
+CREATE MATERIALIZED VIEW MV_RENDIMIENTO_MEDICOS
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT 
+    t.ANIO,
+    t.TRIMESTRE,
+    t.NOMBRE_MES,
+    t.MES,
+    m.SK_MEDICO,
+    m.BK_ID_MEDICO,
+    m.NUM_COLEGIADO,
+    m.NOMBRE_COMPLETO AS NOMBRE_MEDICO,
+    c.NOMBRE_CLINICA AS CLINICA_ATENCION,
+    COUNT(DISTINCT f.SK_PACIENTE) AS TOTAL_PACIENTES_UNICOS,
+    COUNT(*) AS TOTAL_CONSULTAS_REALIZADAS,
+    SUM(f.CANTIDAD_PROCEDIMIENTOS) AS TOTAL_PROCEDIMIENTOS_REALIZADOS,
+    ROUND(SUM(f.PRECIO_HONORARIOS), 2) AS TOTAL_HONORARIOS_GENERADOS,
+    ROUND(SUM(f.TOTAL_PROCEDIMIENTOS), 2) AS TOTAL_PROCEDIMIENTOS_FACTURADOS,
+    ROUND(SUM(f.MONTO_TOTAL_FACTURADO), 2) AS TOTAL_FACTURACION_ATENCIONES,
+    ROUND(AVG(f.PRECIO_HONORARIOS), 2) AS HONORARIO_PROMEDIO_CONSULTA
+FROM FACT_CONSULTAS f
+INNER JOIN DIM_TIEMPO t ON t.SK_TIEMPO = f.SK_TIEMPO
+INNER JOIN DIM_MEDICO m ON m.SK_MEDICO = f.SK_MEDICO
+INNER JOIN DIM_CLINICA c ON c.SK_CLINICA = f.SK_CLINICA
+GROUP BY 
+    t.ANIO, t.TRIMESTRE, t.NOMBRE_MES, t.MES,
+    m.SK_MEDICO, m.BK_ID_MEDICO, m.NUM_COLEGIADO, m.NOMBRE_COMPLETO,
+    c.NOMBRE_CLINICA;
+
+COMMENT ON MATERIALIZED VIEW MV_RENDIMIENTO_MEDICOS IS 'Data Mart agregado: Rendimiento profesional, consultas y honorarios medicos';
+
+-- ----------------------------------------------------------------------------
+-- 5. VISTA MATERIALIZADA: MV_COBERTURA_SEGUROS_PAGADORES
+-- ----------------------------------------------------------------------------
+PROMPT >>> [5/5] Creando MV_COBERTURA_SEGUROS_PAGADORES...
+CREATE MATERIALIZED VIEW MV_COBERTURA_SEGUROS_PAGADORES
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT 
+    t.ANIO,
+    t.TRIMESTRE,
+    t.NOMBRE_MES,
+    t.MES,
+    dp.CATEGORIA_PAGADOR,
+    dp.TIPO_PAGADOR,
+    dp.NOMBRE_PAGADOR,
+    dfp.NOMBRE_FORMA_PAGO AS FORMA_PAGO_PREDOMINANTE,
+    dfp.CATEGORIA AS CATEGORIA_FORMA_PAGO,
+    COUNT(*) AS TOTAL_CUOTAS_LIQUIDADAS,
+    COUNT(DISTINCT fcb.BK_ID_CONSULTA) AS TOTAL_CONSULTAS_CUBIERTAS,
+    ROUND(SUM(fcb.MONTO_ASIGNADO), 2) AS MONTO_TOTAL_RESPONSABILIDAD,
+    ROUND(SUM(fcb.MONTO_PAGADO), 2) AS MONTO_TOTAL_PAGADO,
+    ROUND(SUM(fcb.SALDO_PENDIENTE), 2) AS CARTERA_MOROSA_PENDIENTE,
+    ROUND(AVG(fcb.PORCENTAJE_COBERTURA), 2) AS PORCENTAJE_COBERTURA_PROMEDIO,
+    ROUND(SUM(fcb.MONTO_PAGADO) * 100.0 / NULLIF(SUM(fcb.MONTO_ASIGNADO), 0), 2) AS TASA_RECUPERACION_PAGADOR_PCT
+FROM FACT_COBROS_DISTRIBUCION fcb
+INNER JOIN DIM_TIEMPO t ON t.SK_TIEMPO = fcb.SK_TIEMPO
+INNER JOIN DIM_PAGADOR dp ON dp.SK_PAGADOR = fcb.SK_PAGADOR
+LEFT JOIN DIM_FORMA_PAGO dfp ON dfp.SK_FORMA_PAGO = fcb.SK_FORMA_PAGO_PREDOMINANTE
+GROUP BY 
+    t.ANIO, t.TRIMESTRE, t.NOMBRE_MES, t.MES,
+    dp.CATEGORIA_PAGADOR, dp.TIPO_PAGADOR, dp.NOMBRE_PAGADOR,
+    dfp.NOMBRE_FORMA_PAGO, dfp.CATEGORIA;
+
+COMMENT ON MATERIALIZED VIEW MV_COBERTURA_SEGUROS_PAGADORES IS 'Data Mart agregado: Coberturas, copagos y distribucion financiera por tipo de pagador';
+
+-- ----------------------------------------------------------------------------
+-- PROCEDIMIENTO DE REFRESCO AUTOMATIZADO
+-- ----------------------------------------------------------------------------
+PROMPT >>> Compilando procedimiento SP_REFRESH_MATERIALIZED_VIEWS...
+CREATE OR REPLACE PROCEDURE SP_REFRESH_MATERIALIZED_VIEWS (
+    p_batch_id IN VARCHAR2 DEFAULT NULL
+)
+AUTHID DEFINER
+IS
+    v_batch_id VARCHAR2(50);
+    v_audit_id NUMBER;
+BEGIN
+    v_batch_id := NVL(p_batch_id, 'BATCH_' || TO_CHAR(SYSDATE, 'YYYYMMDD_HH24MISS'));
+    SP_AUDIT_START(v_batch_id, 'DWH_MVIEWS', 'MVIEWS_ALL', 'SP_REFRESH_MATERIALIZED_VIEWS', 'FULL', v_audit_id);
+
+    DBMS_MVIEW.REFRESH('MV_VISITAS_POR_ESPECIALIDAD', 'C', atomic_refresh => FALSE);
+    DBMS_MVIEW.REFRESH('MV_COSTO_POR_CLINICA', 'C', atomic_refresh => FALSE);
+    DBMS_MVIEW.REFRESH('MV_RECURRENCIA_PACIENTES', 'C', atomic_refresh => FALSE);
+    DBMS_MVIEW.REFRESH('MV_RENDIMIENTO_MEDICOS', 'C', atomic_refresh => FALSE);
+    DBMS_MVIEW.REFRESH('MV_COBERTURA_SEGUROS_PAGADORES', 'C', atomic_refresh => FALSE);
+
+    SP_AUDIT_END(v_audit_id, 5, 5, 0, 0, 'SUCCESS');
+    DBMS_OUTPUT.PUT_LINE('5 Vistas materializadas refrescadas exitosamente.');
+EXCEPTION
+    WHEN OTHERS THEN
+        IF v_audit_id IS NOT NULL THEN
+            SP_AUDIT_ERROR(v_audit_id, TO_CHAR(SQLCODE), SQLERRM);
+        END IF;
+        RAISE;
+END SP_REFRESH_MATERIALIZED_VIEWS;
+/
+
+PROMPT ============================================================================
+PROMPT VISTAS MATERIALIZADAS Y PROCEDIMIENTO DESPLEGADOS CORRECTAMENTE.
+PROMPT ============================================================================

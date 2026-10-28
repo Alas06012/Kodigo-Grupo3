@@ -125,8 +125,16 @@ ALTER SESSION SET CONTAINER = XEPDB1;
 -- EJECUCION: Conectado como dwh_clinica_user (DwhPass2026)
 -- ----------------------------------------------------------------------------
 PROMPT
-PROMPT >>> [8/8] VALIDANDO LOS 12 KPIS DE NEGOCIO EN EL DATA WAREHOUSE...
+PROMPT >>> [8/9] VALIDANDO LOS 12 KPIS DE NEGOCIO EN EL DATA WAREHOUSE...
 @"D:/Diego/Cursos/KODIGO SQL IA/ProyectoFinal/PASOS_CREACION/07_VALIDAR_KPIS_Y_AUDITORIA.sql"
+
+-- ----------------------------------------------------------------------------
+-- PASO 08: VISTAS MATERIALIZADAS ANALÍTICAS Y PROCEDIMIENTO DE REFRESCO
+-- EJECUCION: Conectado como dwh_clinica_user (DwhPass2026)
+-- ----------------------------------------------------------------------------
+PROMPT
+PROMPT >>> [9/9] CREANDO LAS 5 VISTAS MATERIALIZADAS ANALÍTICAS...
+@"D:/Diego/Cursos/KODIGO SQL IA/ProyectoFinal/PASOS_CREACION/08_CREAR_VISTAS_MATERIALIZADAS.sql"
 
 PROMPT
 PROMPT ============================================================================
