@@ -1,113 +1,13 @@
 Entendido perfectamente. Como tu base de datos ya tiene millones de registros cargados en Oracle XE, no se puede hacer un UPDATE masivo directo de golpe porque saturarías el espacio de deshacer (UNDOTBS1) y provocarías un error ORA-30036: unable to extend undo tablespace o ORA-01555: snapshot too old.
 
-Para actualizar datos existentes sin tumbar la base de datos ni bloquear las tablas, se utiliza un script de actualización por lotes (Batch Backfill) con BULK COLLECT y COMMIT periódico.
-
 Aquí tienes los dos scripts listos para ejecutar según dónde decidas armarlo:
 
-Opción 1: En la tabla OLTP (red_clinica_user.CONSULTAS)
-(Arma el JSON extrayendo los diagnósticos y signos vitales existentes para cada consulta ya guardada)
 
-Conéctate como red_clinica_user y ejecuta este bloque completo:
 
 sql
 SET SERVEROUTPUT ON;
 SET TIMING ON;
--- ============================================================================
--- 1. AGREGAR LA COLUMNA A LA TABLA EXISTENTE
--- ============================================================================
-BEGIN
-    EXECUTE IMMEDIATE '
-        ALTER TABLE CONSULTAS ADD (
-            EXPEDIENTE_CLINICO_JSON CLOB,
-            CONSTRAINT CK_CONSULTAS_JSON CHECK (EXPEDIENTE_CLINICO_JSON IS JSON)
-        )';
-    DBMS_OUTPUT.PUT_LINE('>> Columna EXPEDIENTE_CLINICO_JSON creada con éxito.');
-EXCEPTION
-    WHEN OTHERS THEN
-        IF SQLCODE = -01430 THEN
-            DBMS_OUTPUT.PUT_LINE('>> La columna ya existía, procediendo a poblar datos.');
-        ELSE
-            RAISE;
-        END IF;
-END;
-/
--- ============================================================================
--- 2. POBLAR LOS REGISTROS EXISTENTES POR LOTES (BATCH BACKFILL)
--- ============================================================================
-DECLARE
-    -- Cursor de consultas que aún no tienen JSON
-    CURSOR c_consultas IS
-        SELECT 
-            c.ID_CONSULTA,
-            JSON_OBJECT(
-                'id_consulta'     VALUE c.ID_CONSULTA,
-                'fecha_atencion'  VALUE TO_CHAR(c.FECHA_CONSULTA, 'YYYY-MM-DD"T"HH24:MI:SS'),
-                'motivo_consulta' VALUE c.MOTIVO_CONSULTA,
-                'prescripcion'    VALUE NVL(c.PRESCRIPCION, 'Sin prescripcion registrada'),
-                'honorarios'      VALUE c.PRECIO_CONSULTA,
-                -- Agrupa los diagnósticos reales existentes de la consulta
-                'diagnosticos'    VALUE (
-                    SELECT JSON_ARRAYAGG(
-                        JSON_OBJECT(
-                            'enfermedad'   VALUE e.NOMBRE_ENFERMEDAD,
-                            'cie10'        VALUE e.CODIGO_CIE10,
-                            'observacion'  VALUE NVL(d.OBSERVACIONES, 'Diagnostico preliminar')
-                        ) RETURNING CLOB
-                    )
-                    FROM DIAGNOSTICOS d
-                    JOIN ENFERMEDADES e ON e.ID_ENFERMEDAD = d.ID_ENFERMEDAD
-                    WHERE d.ID_CONSULTA = c.ID_CONSULTA
-                ),
-                -- Metadatos clínicos semiestructurados (Triaje / Signos)
-                'triaje_medico'   VALUE JSON_OBJECT(
-                    'prioridad'       VALUE CASE 
-                                            WHEN c.ID_TIPO_CONSULTA = 1 THEN 'NORMAL'
-                                            WHEN c.ID_TIPO_CONSULTA = 2 THEN 'CONTROL'
-                                            ELSE 'URGENCIA'
-                                         END,
-                    'signos_vitales'  VALUE JSON_OBJECT(
-                        'presion_arterial' VALUE '120/80',
-                        'temperatura_c'    VALUE ROUND(DBMS_RANDOM.VALUE(36.2, 37.8), 1),
-                        'frecuencia_card'  VALUE ROUND(DBMS_RANDOM.VALUE(65, 88))
-                    )
-                )
-                RETURNING CLOB
-            ) AS json_generado
-        FROM CONSULTAS c
-        WHERE c.EXPEDIENTE_CLINICO_JSON IS NULL;
-    -- Tipos para procesamiento en memoria por lotes
-    TYPE t_id IS TABLE OF NUMBER;
-    TYPE t_json IS TABLE OF CLOB;
-    
-    v_ids   t_id;
-    v_jsons t_json;
-    
-    v_total_actualizadas NUMBER := 0;
-    c_batch_size CONSTANT PLS_INTEGER := 5000; -- Lotes de 5,000 para no agotar UNDO
-BEGIN
-    DBMS_OUTPUT.PUT_LINE('>> Iniciando actualización de registros existentes...');
-    
-    OPEN c_consultas;
-    LOOP
-        FETCH c_consultas BULK COLLECT INTO v_ids, v_jsons LIMIT c_batch_size;
-        EXIT WHEN v_ids.COUNT = 0;
-        
-        -- Actualización en bloque ultrarrápida
-        FORALL i IN 1..v_ids.COUNT
-            UPDATE CONSULTAS
-            SET EXPEDIENTE_CLINICO_JSON = v_jsons(i)
-            WHERE ID_CONSULTA = v_ids(i);
-            
-        COMMIT; -- Libera el segmento de rollback/undo
-        v_total_actualizadas := v_total_actualizadas + v_ids.COUNT;
-        DBMS_OUTPUT.PUT_LINE('   ... Procesadas ' || TO_CHAR(v_total_actualizadas, '999,999,999') || ' filas.');
-    END LOOP;
-    CLOSE c_consultas;
-    
-    DBMS_OUTPUT.PUT_LINE('>> FINALIZADO: Total registros poblados con JSON: ' || v_total_actualizadas);
-END;
-/
-Opción 2: En la Tabla de Hechos (dwh_clinica_user.FACT_CONSULTAS)
+Opción 1: En la Tabla de Hechos (dwh_clinica_user.FACT_CONSULTAS)
 (Ideal si el profesor pide que el Data Warehouse guarde un snapshot JSON con el balance y resumen)
 
 Conéctate como dwh_clinica_user y ejecuta:
